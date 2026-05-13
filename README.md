@@ -1,13 +1,17 @@
-# Data Fitting & Phương Pháp OLS
+<div align="center">
 
-> **Đồ án 2 — MTH00051: Toán Ứng Dụng và Thống Kê**  
-> Đại học Khoa học Tự nhiên — ĐHQG TP.HCM · HK2 2025–2026
+# 📐 Data Fitting & Phương Pháp OLS
+
+**Đồ án 2 — MTH00051: Toán Ứng Dụng và Thống Kê**  
+Trường Đại học Khoa học Tự nhiên — ĐHQG TP.HCM · HK2 2025–2026
 
 ![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python&logoColor=white)
 ![NumPy](https://img.shields.io/badge/NumPy-1.26+-013243?logo=numpy)
 ![SciPy](https://img.shields.io/badge/SciPy-1.12+-8CAAE6?logo=scipy)
 ![Jupyter](https://img.shields.io/badge/Jupyter-Notebook-F37626?logo=jupyter&logoColor=white)
 ![License](https://img.shields.io/badge/License-Academic-lightgrey)
+
+</div>
 
 ---
 
