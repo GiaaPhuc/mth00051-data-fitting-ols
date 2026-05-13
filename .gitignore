@@ -219,3 +219,7 @@ __marimo__/
 
 # Files for the project
 Toan UDTK_Project_2-Data Fitting va OLS.pdf
+automobile/
+
+# Test files
+test_ols_implementation.py
