@@ -1,74 +1,52 @@
 import numpy as np
-import matplotlib.pyplot as plt
-from typing import Dict, Union, List
 
+def ridge_fit(X: np.ndarray, y: np.ndarray, lam: float) -> dict:
+    """Estimates Ridge Regression coefficients (L2 regularization).
 
-def standardize(X: np.ndarray) -> tuple:
-    """Standardizes the features using Z-score (mean=0, std=1).
-
-    Args:
-        X (np.ndarray): The feature matrix of shape (n, p).
-
-    Returns:
-        tuple: (X_std, mean, std)
-            X_std: Standardized feature matrix.
-            mean: Mean of each feature.
-            std: Standard deviation of each feature.
-    """
-    mean = np.mean(X, axis=0)
-    std = np.std(X, axis=0)
-    # Avoid division by zero
-    std[std == 0] = 1.0
-    X_std = (X - mean) / std
-    return X_std, mean, std
-
-
-def ridge_fit(X: np.ndarray, y: np.ndarray, lam: float) -> Dict[str, Union[np.ndarray, float]]:
-    """Fits a Ridge regression model using the closed-form solution.
-
-    Formula: beta = (X^T * X + lam * I)^-1 * X^T * y
+    Formula: beta = (X^T X + lam * I)^-1 X^T y
 
     Args:
-        X (np.ndarray): The feature matrix of shape (n, p).
-        y (np.ndarray): The target vector of shape (n,).
-        lam (float): Regularization parameter (lambda).
+        X (np.ndarray): Design matrix of shape (n, p+1) including intercept column.
+        y (np.ndarray): Target vector of shape (n,).
+        lam (float): Regularization parameter (penalty).
 
     Returns:
-        Dict[str, Union[np.ndarray, float]]: A dictionary containing:
-            - beta_hat: Coefficients on the original scale (including intercept).
+        dict: A dictionary containing:
+            - beta_hat: Coefficients on the original scale.
             - beta_std: Coefficients on the standardized scale.
             - y_hat: Predicted values.
-            - residuals: Difference between actual and predicted values.
+            - residuals: Residual vector.
     """
-    n, p = X.shape
-    X_std, X_mean, X_std_dev = standardize(X)
-    
-    # Center y
+    X = np.asarray(X, dtype=float)
+    y = np.asarray(y, dtype=float)
+    n, k = X.shape
+
+    # 1. Automatic standardization (centering and scaling)
+    means = np.mean(X[:, 1:], axis=0)
+    stds = np.std(X[:, 1:], axis=0)
+    stds[stds == 0] = 1.0  
+
+    X_std = np.copy(X)
+    X_std[:, 1:] = (X[:, 1:] - means) / stds
+
     y_mean = np.mean(y)
-    y_centered = y - y_mean
-    
-    # Closed-form solution for standardized scale (no intercept in X_std yet)
-    # Most implementations don't penalize the intercept, but we strictly follow the 
-    # formula on the augmented matrix if needed. Here we fit standardized data.
-    I = np.eye(p)
-    beta_std_core = np.linalg.solve(X_std.T @ X_std + lam * I, X_std.T @ y_centered)
-    
-    # Reconstruct original scale coefficients
-    # beta_j = beta_std_j * (std_y / std_x_j)
-    # Since we didn't scale y by its std (only centered), std_y is implicitly 1.0 here
-    # or we can assume y was not scaled.
-    beta_hat_core = beta_std_core / X_std_dev
-    intercept = y_mean - np.dot(X_mean, beta_hat_core)
-    
-    beta_hat = np.concatenate(([intercept], beta_hat_core))
-    
-    # Standardized beta (including intercept which is effectively 0 for centered data)
-    beta_std = np.concatenate(([0.0], beta_std_core))
-    
-    X_with_intercept = np.column_stack([np.ones(n), X])
-    y_hat = X_with_intercept @ beta_hat
+    y_std = y - y_mean
+
+    # 2. Closed-form solution: (X^T X + lam * I) * beta = X^T y
+    I = np.eye(k)
+    XtX = X_std.T @ X_std
+    Xty = X_std.T @ y_std
+
+    beta_std = np.linalg.solve(XtX + lam * I, Xty)
+
+    # 3. Unstandardize to original scale
+    beta_hat = np.zeros(k)
+    beta_hat[1:] = beta_std[1:] / stds
+    beta_hat[0] = beta_std[0] + y_mean - np.sum(beta_hat[1:] * means)
+
+    y_hat = X @ beta_hat
     residuals = y - y_hat
-    
+
     return {
         "beta_hat": beta_hat,
         "beta_std": beta_std,
@@ -77,103 +55,117 @@ def ridge_fit(X: np.ndarray, y: np.ndarray, lam: float) -> Dict[str, Union[np.nd
     }
 
 
-def soft_threshold(a: float, b: float) -> float:
-    """Applies the soft-thresholding operator.
+def lasso_fit(X: np.ndarray, y: np.ndarray, lam: float, tol: float = 1e-4, max_iter: int = 1000) -> dict:
+    """Estimates Lasso Regression coefficients (L1 regularization) using Coordinate Descent.
 
     Args:
-        a (float): The value to threshold.
-        b (float): The threshold (lambda).
+        X (np.ndarray): Design matrix of shape (n, p+1) including intercept column.
+        y (np.ndarray): Target vector of shape (n,).
+        lam (float): Regularization parameter (penalty).
+        tol (float): Convergence tolerance for stopping criteria.
+        max_iter (int): Maximum number of iterations.
 
     Returns:
-        float: The thresholded value.
-    """
-    return np.sign(a) * np.maximum(0, np.abs(a) - b)
-
-
-def lasso_fit(X: np.ndarray, y: np.ndarray, lam: float, max_iter: int = 1000, tol: float = 1e-4) -> Dict[str, Union[np.ndarray, float]]:
-    """Fits a Lasso regression model using Coordinate Descent.
-
-    Args:
-        X (np.ndarray): The feature matrix of shape (n, p).
-        y (np.ndarray): The target vector of shape (n,).
-        lam (float): Regularization parameter (lambda).
-        max_iter (int): Maximum number of iterations. Defaults to 1000.
-        tol (float): Convergence tolerance. Defaults to 1e-4.
-
-    Returns:
-        Dict[str, Union[np.ndarray, float]]: A dictionary containing:
-            - beta_hat: Coefficients on the original scale (including intercept).
+        dict: A dictionary containing:
+            - beta_hat: Coefficients on the original scale.
             - beta_std: Coefficients on the standardized scale.
             - y_hat: Predicted values.
-            - residuals: Difference between actual and predicted values.
+            - residuals: Residual vector.
+            - iterations: Number of iterations performed.
     """
-    n, p = X.shape
-    X_std, X_mean, X_std_dev = standardize(X)
-    
+    X = np.asarray(X, dtype=float)
+    y = np.asarray(y, dtype=float)
+    n, k = X.shape
+
+    # 1. Standardization
+    means = np.mean(X[:, 1:], axis=0)
+    stds = np.std(X[:, 1:], axis=0)
+    stds[stds == 0] = 1.0 
+
+    X_std = np.copy(X)
+    X_std[:, 1:] = (X[:, 1:] - means) / stds
+
     y_mean = np.mean(y)
-    y_centered = y - y_mean
-    
-    beta_std_core = np.zeros(p)
-    
-    for _ in range(max_iter):
-        beta_old = beta_std_core.copy()
-        
-        for j in range(p):
-            # Calculate residual without feature j
-            r = y_centered - (X_std @ beta_std_core - X_std[:, j] * beta_std_core[j])
-            rho = X_std[:, j] @ r
-            
-            # Coordinate update
-            beta_std_core[j] = soft_threshold(rho, lam) / (X_std[:, j] @ X_std[:, j])
-            
-        if np.linalg.norm(beta_std_core - beta_old) < tol:
+    y_std = y - y_mean
+
+    # 2. Coordinate Descent
+    beta_std = np.zeros(k)
+    z = np.sum(X_std ** 2, axis=0)  
+
+    iterations = 0
+    alpha = lam / 2.0
+    for it in range(max_iter):
+        iterations += 1
+        beta_old = np.copy(beta_std)
+
+        for j in range(k):
+            y_pred_minus_j = X_std @ beta_std - X_std[:, j] * beta_std[j]
+            rho_j = X_std[:, j] @ (y_std - y_pred_minus_j)
+
+            if z[j] == 0:
+                beta_std[j] = 0
+            else:
+                # Soft-thresholding operator
+                if rho_j < -alpha:
+                    beta_std[j] = (rho_j + alpha) / z[j]
+                elif rho_j > alpha:
+                    beta_std[j] = (rho_j - alpha) / z[j]
+                else:
+                    beta_std[j] = 0.0
+
+        if np.max(np.abs(beta_std - beta_old)) < tol:
             break
-            
-    # Transform back to original scale
-    beta_hat_core = beta_std_core / X_std_dev
-    intercept = y_mean - np.dot(X_mean, beta_hat_core)
-    
-    beta_hat = np.concatenate(([intercept], beta_hat_core))
-    beta_std = np.concatenate(([0.0], beta_std_core))
-    
-    X_with_intercept = np.column_stack([np.ones(n), X])
-    y_hat = X_with_intercept @ beta_hat
+
+    # 3. Unstandardize to original scale
+    beta_hat = np.zeros(k)
+    beta_hat[1:] = beta_std[1:] / stds
+    beta_hat[0] = beta_std[0] + y_mean - np.sum(beta_hat[1:] * means)
+
+    y_hat = X @ beta_hat
     residuals = y - y_hat
-    
+
     return {
         "beta_hat": beta_hat,
         "beta_std": beta_std,
         "y_hat": y_hat,
-        "residuals": residuals
+        "residuals": residuals,
+        "iterations": iterations
     }
 
 
-def plot_regularization_trace(X: np.ndarray, y: np.ndarray, lambdas: List[float], method: str = 'ridge'):
-    """Plots the regularization trace of the coefficients.
+def plot_regularization_trace(X: np.ndarray, y: np.ndarray, lambdas: list, method: str = 'ridge'):
+    """Plots the regularization trace of coefficients against lambda.
 
     Args:
-        X (np.ndarray): The feature matrix.
-        y (np.ndarray): The target vector.
-        lambdas (List[float]): A list of lambda values to iterate over.
-        method (str): Either 'ridge' or 'lasso'. Defaults to 'ridge'.
+        X (np.ndarray): Design matrix of shape (n, p+1).
+        y (np.ndarray): Target vector.
+        lambdas (list): List of lambda values to evaluate.
+        method (str): Regularization method, either 'ridge' or 'lasso'.
     """
-    coefs = []
-    fit_func = ridge_fit if method.lower() == 'ridge' else lasso_fit
-    
+    import matplotlib.pyplot as plt
+
+    coefs_std = []
+
     for lam in lambdas:
-        res = fit_func(X, y, lam)
-        coefs.append(res["beta_std"][1:])  # Exclude intercept
-        
-    coefs = np.array(coefs)
-    
+        if method.lower() == 'ridge':
+            res = ridge_fit(X, y, lam)
+        elif method.lower() == 'lasso':
+            res = lasso_fit(X, y, lam)
+        else:
+            raise ValueError("method must be 'ridge' or 'lasso'")
+
+        coefs_std.append(res['beta_std'][1:])
+
+    coefs_std = np.array(coefs_std)
+
     plt.figure(figsize=(10, 6))
-    for i in range(coefs.shape[1]):
-        plt.plot(lambdas, coefs[:, i], label=f'Feature {i+1}')
-        
-    plt.xscale('log')
+    ax = plt.gca()
+    ax.plot(lambdas, coefs_std)
+    ax.set_xscale('log')
+
     plt.xlabel('Lambda (log scale)')
     plt.ylabel('Standardized Coefficients')
     plt.title(f'{method.capitalize()} Regularization Trace')
-    plt.legend()
-    plt.grid(True)
+    plt.axis('tight')
+    plt.grid(True, linestyle='--', alpha=0.7)
     plt.show()
