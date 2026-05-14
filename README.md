@@ -1,11 +1,11 @@
 <div align="center">
 
-# 📐 Data Fitting & Phương Pháp OLS
+# Data Fitting & Phương Pháp OLS
 
 **Đồ án 2 — MTH00051: Toán Ứng Dụng và Thống Kê**  
-Trường Đại học Khoa học Tự nhiên — ĐHQG TP.HCM · HK2 2025–2026
+Khoa Công nghệ Thông tin — Trường ĐH Khoa học Tự nhiên — ĐHQG TP.HCM · HK2 2025–2026
 
-![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python&logoColor=white)
 ![NumPy](https://img.shields.io/badge/NumPy-1.26+-013243?logo=numpy)
 ![SciPy](https://img.shields.io/badge/SciPy-1.12+-8CAAE6?logo=scipy)
 ![Jupyter](https://img.shields.io/badge/Jupyter-Notebook-F37626?logo=jupyter&logoColor=white)
@@ -15,9 +15,30 @@ Trường Đại học Khoa học Tự nhiên — ĐHQG TP.HCM · HK2 2025–202
 
 ---
 
-## Tổng quan
+## Giới thiệu
 
-Đồ án triển khai **Ordinary Least Squares (OLS)** từ nền tảng toán học, không dựa vào các hàm hồi quy có sẵn của `scikit-learn`. Dự án được chia làm hai phần:
+Đồ án tập trung vào hai nhóm nhiệm vụ:
+
+1. **Lý thuyết và minh họa** — Nắm vững nền tảng toán học của data fitting và phương pháp Ordinary Least Squares (OLS), minh họa bằng code Python tự cài đặt từ đầu.
+2. **Ứng dụng thực tế** — Vận dụng data fitting để phân tích bộ dữ liệu thực, bao gồm tiền xử lý, xây dựng mô hình hồi quy và đánh giá kết quả có hệ thống.
+
+> **Lưu ý:** Các hàm như `sklearn.linear_model.LinearRegression`, `numpy.linalg.lstsq` chỉ được dùng để **kiểm chứng**. Toàn bộ thuật toán chính phải được cài đặt từ đầu dựa trên công thức toán học.
+
+---
+
+## Thông tin môn học
+
+| Thông tin    | Chi tiết                                 |
+| ------------ | ---------------------------------------- |
+| Môn học      | Toán Ứng Dụng và Thống Kê — MTH00051     |
+| GV Thực hành | ThS. Võ Nam Thục Đoan · ThS. Lê Nhựt Nam |
+| Email GV     | {vntdoan, lnnam}@fit.hcmus.edu.vn        |
+| Hạn nộp bài  | **30/05/2026, trước 23:59**              |
+| Nộp qua      | Moodle của Khoa                          |
+
+---
+
+## Tổng quan hai phần
 
 | Phần       | Nội dung                                                                                                    |
 | ---------- | ----------------------------------------------------------------------------------------------------------- |
@@ -30,6 +51,7 @@ Trường Đại học Khoa học Tự nhiên — ĐHQG TP.HCM · HK2 2025–202
 
 ```
 mth00051-data-fitting-ols/
+├── README.md
 ├── requirements.txt
 ├── report/
 │   ├── report.pdf
@@ -47,6 +69,7 @@ mth00051-data-fitting-ols/
 │   └── part1_notebook.ipynb
 └── part2/                            # Ứng dụng dữ liệu thực
     ├── data/
+    │   └── <ten_dataset>.csv
     ├── data_pipeline.py              # class DataPipeline
     ├── model_comparison.py           # compare_models
     ├── advanced_methods.py           # KernelRidgeRegression,
@@ -58,7 +81,7 @@ mth00051-data-fitting-ols/
 
 ## Cài đặt
 
-**Yêu cầu:** Python ≥ 3.11
+**Yêu cầu:** Python ≥ 3.10
 
 ```bash
 # Clone repository
@@ -89,23 +112,33 @@ python part1/test_ols_implementation.py
 
 ---
 
-## API — `part1/ols_implementation.py`
+## Mô tả các module
 
-Tất cả hàm nhận **ma trận design đã có cột intercept** `X` shape `(n, p+1)`.
+### Part 1
 
-| Hàm                                      | Đầu vào       | Đầu ra                                      | Mô tả                                                       |
-| ---------------------------------------- | ------------- | ------------------------------------------- | ----------------------------------------------------------- |
-| `ols_fit(X, y)`                          | `X`, `y`      | `beta_hat, sigma2, y_hat, residuals, rss`   | Ước lượng OLS qua Normal Equations: β̂ = (XᵀX)⁻¹Xᵀy          |
-| `hat_matrix(X)`                          | `X`           | `H` (n×n)                                   | Hat matrix H = QQᵀ (QR decomposition); kiểm tra 4 tính chất |
-| `model_metrics(y, y_hat, p)`             | `y`, `ŷ`, `p` | `r2, r2_adj, f_stat, f_pvalue, ...`         | R², R² hiệu chỉnh, F-test tổng thể                          |
-| `coef_inference(X, y, beta_hat, sigma2)` | —             | `se, t_stats, p_values, ci_lower, ci_upper` | Kiểm định t và khoảng tin cậy cho từng hệ số                |
-| `vif(X)`                                 | `X`           | `vif_values` (p,)                           | VIF phát hiện đa cộng tuyến; VIF > 10 → đáng lo ngại        |
+| File                         | Nội dung chính                                                                                                                                     |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ols_implementation.py`      | `ols_fit` — Normal Equations; `hat_matrix` — H = QQᵀ; `model_metrics` — R², F-test; `coef_inference` — t-test, CI; `vif` — phát hiện đa cộng tuyến |
+| `ridge_lasso.py`             | `ridge_fit` — Ridge Regression (L2), vẽ ridge trace; `lasso_fit` — Lasso Regression (L1) qua coordinate descent                                    |
+| `residual_analysis.py`       | `residual_plots` — 4 biểu đồ chẩn đoán phần dư (Residuals vs Fitted, Q-Q, Scale-Location, Cook's Distance)                                         |
+| `cross_validation.py`        | `kfold_cv` — k-fold cross-validation, tính CV score, so sánh mô hình theo AIC/BIC                                                                  |
+| `test_ols_implementation.py` | Unit tests (≥ 2 test / hàm) kiểm chứng kết quả trên dữ liệu đã biết                                                                                |
+
+### Part 2
+
+| File                  | Nội dung chính                                                                                                       |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `data_pipeline.py`    | `class DataPipeline` — EDA, xử lý missing values, encoding, chuẩn hóa; `fit` trên train, `transform` trên test       |
+| `model_comparison.py` | So sánh ≥ 3 mô hình (OLS, Ridge/Lasso, mô hình khác) — bảng MAE, RMSE, R² trên test set                              |
+| `advanced_methods.py` | `KernelRidgeRegression` — kernel trick (RBF, polynomial); `BayesianLinearRegression` — posterior, credible intervals |
 
 ---
 
 ## Dữ liệu
 
 Đồ án sử dụng bộ dữ liệu **[UCI Automobile](https://archive.ics.uci.edu/dataset/10/automobile)** (`automobile/imports-85.data`), gồm 205 quan sát và 26 thuộc tính mô tả đặc điểm kỹ thuật, bảo hiểm và giá xe hơi năm 1985.
+
+Tiêu chí bộ dữ liệu Part 2: thực tế (real-world), có missing values (≥ 5%), biến mục tiêu liên tục, n ≥ 200 quan trắc, p ≥ 3 biến đặc trưng, từ nguồn đáng tin cậy (Kaggle, UCI, data.gov, v.v.).
 
 ---
 
