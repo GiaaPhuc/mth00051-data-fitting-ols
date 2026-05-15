@@ -5,18 +5,244 @@ Phần 1 — Đồ án 2: Data Fitting và Phương Pháp OLS
 Môn: Toán Ứng Dụng và Thống Kê (MTH00051)
 
 Cài đặt thuật toán OLS hoàn toàn từ đầu dựa trên công thức toán học,
-không sử dụng sklearn.linear_model hay numpy.linalg.lstsq để thay thế.
+không sử dụng numpy, scipy, hoặc sklearn.
 """
 
-import numpy as np
-from scipy import stats
+import math
+
+
+# ---------------------------------------------------------------------------
+# ĐẠI SỐ TUYẾN TÍNH THUẦN PYTHON
+# Thay thế: numpy.array / .T / @ / linalg.inv / linalg.solve
+# ---------------------------------------------------------------------------
+
+def create_ones(n):
+    """Trả về list n phần tử giá trị 1.0."""
+    return [1.0] * n
+
+
+def column_stack(ones_col, X):
+    """
+    Thêm cột toàn số 1 vào đầu ma trận X (list of lists).
+    Thay thế np.column_stack([np.ones(n), X]).
+    """
+    return [[1.0] + row for row in X]
+
+
+def transpose(A):
+    """
+    Chuyển vị ma trận 2D (m x n) -> (n x m).
+    Thay thế A.T.
+    """
+    m = len(A)
+    n = len(A[0])
+    return [[A[i][j] for i in range(m)] for j in range(n)]
+
+
+def mat_mul(A, B):
+    """
+    Nhân hai ma trận 2D: (m x k) @ (k x n) -> (m x n).
+    Thay thế toán tử @.
+    """
+    m = len(A)
+    k = len(B)
+    n = len(B[0])
+    C = [[0.0] * n for _ in range(m)]
+    for i in range(m):
+        for j in range(n):
+            s = 0.0
+            for l in range(k):
+                s += A[i][l] * B[l][j]
+            C[i][j] = s
+    return C
+
+
+def mat_vec_mul(A, v):
+    """
+    Nhân ma trận A (m x n) với vector v (n,) -> (m,).
+    Thay thế A @ v khi v là list 1D.
+    """
+    m = len(A)
+    n = len(v)
+    return [sum(A[i][j] * v[j] for j in range(n)) for i in range(m)]
+
+
+def mat_inv(A):
+    """
+    Nghịch đảo ma trận vuông dùng khử Gauss-Jordan với partial pivoting.
+    Thay thế np.linalg.inv(A).
+    """
+    n = len(A)
+    I_mat = [[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
+    aug = [A[i][:] + I_mat[i] for i in range(n)]
+    for col in range(n):
+        pivot_row = max(range(col, n), key=lambda r: abs(aug[r][col]))
+        aug[col], aug[pivot_row] = aug[pivot_row], aug[col]
+        pivot = aug[col][col]
+        if abs(pivot) < 1e-14:
+            raise ValueError(f"Ma trận suy biến tại cột {col}, không thể nghịch đảo.")
+        aug[col] = [x / pivot for x in aug[col]]
+        for row in range(n):
+            if row != col:
+                factor = aug[row][col]
+                aug[row] = [aug[row][j] - factor * aug[col][j] for j in range(2 * n)]
+    return [aug[i][n:] for i in range(n)]
+
+
+def vec_sub(a, b):
+    """Hiệu hai vector: a - b."""
+    return [a[i] - b[i] for i in range(len(a))]
+
+
+def vec_sum_sq(v):
+    """Tổng bình phương: Σ vᵢ². Thay thế np.sum(v ** 2)."""
+    return sum(x * x for x in v)
+
+
+def mat_diag(A):
+    """Trả về vector đường chéo chính của ma trận vuông. Thay thế np.diag(A)."""
+    return [A[i][i] for i in range(len(A))]
+
+
+def scalar_mat_mul(s, A):
+    """Nhân vô hướng s với ma trận A. Thay thế s * A."""
+    return [[s * A[i][j] for j in range(len(A[0]))] for i in range(len(A))]
+
+
+def mat_del_col(A, j):
+    """Xoá cột j khỏi ma trận A. Thay thế np.delete(A, j, axis=1)."""
+    return [[A[i][k] for k in range(len(A[0])) if k != j] for i in range(len(A))]
+
+
+# ---------------------------------------------------------------------------
+# PHÂN PHỐI THỐNG KÊ THUẦN PYTHON
+# Thay thế: scipy.stats.t  và  scipy.stats.f
+# ---------------------------------------------------------------------------
+
+def _betacf(a, b, x):
+    """
+    Khai triển phân số liên tục cho hàm beta không hoàn chỉnh.
+    Thuật toán Lentz chỉnh sửa (Numerical Recipes, §6.4).
+    """
+    MAXIT = 300
+    EPS   = 3.0e-10
+    FPMIN = 1.0e-300
+
+    qab = a + b
+    qap = a + 1.0
+    qam = a - 1.0
+    c = 1.0
+    d = 1.0 - qab * x / qap
+    if abs(d) < FPMIN:
+        d = FPMIN
+    d = 1.0 / d
+    h = d
+
+    for m in range(1, MAXIT + 1):
+        m2 = 2 * m
+        aa = m * (b - m) * x / ((qam + m2) * (a + m2))
+        d  = 1.0 + aa * d
+        if abs(d) < FPMIN:
+            d = FPMIN
+        c  = 1.0 + aa / c
+        if abs(c) < FPMIN:
+            c = FPMIN
+        d  = 1.0 / d
+        h *= d * c
+
+        aa = -(a + m) * (qab + m) * x / ((a + m2) * (qap + m2))
+        d  = 1.0 + aa * d
+        if abs(d) < FPMIN:
+            d = FPMIN
+        c  = 1.0 + aa / c
+        if abs(c) < FPMIN:
+            c = FPMIN
+        d  = 1.0 / d
+        delta = d * c
+        h *= delta
+        if abs(delta - 1.0) < EPS:
+            break
+
+    return h
+
+
+def _betai(a, b, x):
+    """
+    Hàm beta không hoàn chỉnh chính quy I_x(a, b).
+    Thay thế scipy.special.betainc(a, b, x).
+    """
+    if x < 0.0 or x > 1.0:
+        raise ValueError("x phải nằm trong [0, 1].")
+    if x == 0.0:
+        return 0.0
+    if x == 1.0:
+        return 1.0
+    bt = math.exp(
+        math.lgamma(a + b) - math.lgamma(a) - math.lgamma(b)
+        + a * math.log(x) + b * math.log(1.0 - x)
+    )
+    if x < (a + 1.0) / (a + b + 2.0):
+        return bt * _betacf(a, b, x) / a
+    else:
+        return 1.0 - bt * _betacf(b, a, 1.0 - x) / b
+
+
+def t_cdf(t_val, df):
+    """
+    CDF của phân phối t-Student: P(T ≤ t_val | df).
+    Công thức: dùng I_x(df/2, 1/2) với x = df / (df + t²).
+    Thay thế scipy.stats.t.cdf(t_val, df).
+    """
+    x     = df / (df + t_val * t_val)
+    p_tail = _betai(df / 2.0, 0.5, x)
+    if t_val >= 0:
+        return 1.0 - 0.5 * p_tail
+    else:
+        return 0.5 * p_tail
+
+
+def t_ppf(q, df):
+    """
+    Quantile (nghịch đảo CDF) của phân phối t-Student.
+    Tìm t sao cho P(T ≤ t | df) = q bằng bisection.
+    Thay thế scipy.stats.t.ppf(q, df).
+    """
+    if q <= 0.0:
+        return -math.inf
+    if q >= 1.0:
+        return math.inf
+    if q == 0.5:
+        return 0.0
+
+    lo, hi = -1000.0, 1000.0
+    for _ in range(200):
+        mid = (lo + hi) / 2.0
+        if t_cdf(mid, df) < q:
+            lo = mid
+        else:
+            hi = mid
+        if hi - lo < 1e-10:
+            break
+    return (lo + hi) / 2.0
+
+
+def f_cdf(x, dfn, dfd):
+    """
+    CDF của phân phối F tại điểm x với (dfn, dfd) bậc tự do.
+    Công thức: I_z(dfn/2, dfd/2) với z = dfn*x / (dfn*x + dfd).
+    Thay thế scipy.stats.f.cdf(x, dfn, dfd).
+    """
+    if x <= 0.0:
+        return 0.0
+    z = dfn * x / (dfn * x + dfd)
+    return _betai(dfn / 2.0, dfd / 2.0, z)
 
 
 # ---------------------------------------------------------------------------
 # 1. OLS Fit
 # ---------------------------------------------------------------------------
 
-def ols_fit(X: np.ndarray, y: np.ndarray) -> dict:
+def ols_fit(X, y):
     """
     Ước lượng hệ số OLS và phương sai nhiễu.
 
@@ -26,45 +252,41 @@ def ols_fit(X: np.ndarray, y: np.ndarray) -> dict:
 
     Tham số
     -------
-    X : ndarray, shape (n, p+1)
+    X : list of lists, shape (n, p+1)
         Ma trận design (đã bao gồm cột 1 cho intercept).
-    y : ndarray, shape (n,)
+    y : list, shape (n,)
         Vector biến mục tiêu.
 
     Trả về
     ------
     dict với các khoá:
-        beta_hat  : ndarray (p+1,)  — vector hệ số ước lượng
-        sigma2    : float           — ước lượng phương sai nhiễu σ̂²
-        y_hat     : ndarray (n,)    — giá trị fitted
-        residuals : ndarray (n,)    — phần dư ε̂ = y − ŷ
-        rss       : float           — Residual Sum of Squares
+        beta_hat  : list (p+1,)  — vector hệ số ước lượng
+        sigma2    : float        — ước lượng phương sai nhiễu σ̂²
+        y_hat     : list (n,)    — giá trị fitted
+        residuals : list (n,)    — phần dư ε̂ = y − ŷ
+        rss       : float        — Residual Sum of Squares
     """
-    X = np.asarray(X, dtype=float)
-    y = np.asarray(y, dtype=float)
+    n = len(X)
+    k = len(X[0])   # k = p+1 (bao gồm cột intercept)
+    p = k - 1
 
-    n, k = X.shape          # n observations, k = p+1 columns (incl. intercept)
-    p = k - 1               # number of predictors (excl. intercept)
+    Xt       = transpose(X)
+    XtX      = mat_mul(Xt, X)
+    XtX_inv  = mat_inv(XtX)
+    Xty      = mat_vec_mul(Xt, y)
+    beta_hat = mat_vec_mul(XtX_inv, Xty)
 
-    XtX = X.T @ X
-    Xty = X.T @ y
-
-    # β̂ = (XᵀX)⁻¹ Xᵀy
-    beta_hat = np.linalg.solve(XtX, Xty)
-
-    y_hat = X @ beta_hat
-    residuals = y - y_hat
-    rss = float(residuals @ residuals)
-
-    # σ̂² = RSS / (n − p − 1)
-    sigma2 = rss / (n - p - 1)
+    y_hat     = mat_vec_mul(X, beta_hat)
+    residuals = vec_sub(y, y_hat)
+    rss       = vec_sum_sq(residuals)
+    sigma2    = rss / (n - p - 1)
 
     return {
-        "beta_hat": beta_hat,
-        "sigma2": sigma2,
-        "y_hat": y_hat,
+        "beta_hat":  beta_hat,
+        "sigma2":    sigma2,
+        "y_hat":     y_hat,
         "residuals": residuals,
-        "rss": rss,
+        "rss":       rss,
     }
 
 
@@ -72,46 +294,48 @@ def ols_fit(X: np.ndarray, y: np.ndarray) -> dict:
 # 2. Hat Matrix
 # ---------------------------------------------------------------------------
 
-def hat_matrix(X: np.ndarray) -> np.ndarray:
+def hat_matrix(X):
     """
     Tính Hat Matrix H = X(XᵀX)⁻¹Xᵀ và kiểm tra các tính chất.
 
-    Dùng QR decomposition thay vì nghịch đảo trực tiếp để ổn định số học:
-        X = QR  =>  H = QQᵀ
-
-    Tính chất kiểm tra (Mệnh đề 1.1):
+    Tính chất (Mệnh đề 1.1):
         (i)   H² = H          (idempotent)
         (ii)  Hᵀ = H          (đối xứng)
-        (iii) rank(H) = p + 1
-        (iv)  eigenvalues ∈ {0, 1}
+        (iii) trace(H) = p + 1
 
     Tham số
     -------
-    X : ndarray, shape (n, p+1)
+    X : list of lists, shape (n, p+1)
         Ma trận thiết kế, đã bao gồm cột intercept.
 
     Trả về
     ------
-    H : ndarray, shape (n, n)
+    H : list of lists, shape (n, n)
     """
-    X = np.asarray(X, dtype=float)
+    n = len(X)
+    k = len(X[0])
 
-    Q, _ = np.linalg.qr(X)
-    H = Q @ Q.T
+    Xt       = transpose(X)
+    XtX      = mat_mul(Xt, X)
+    XtX_inv  = mat_inv(XtX)
+    middle   = mat_mul(X, XtX_inv)
+    H        = mat_mul(middle, Xt)
 
-    assert np.allclose(H @ H, H, atol=1e-8), "Hat matrix khong thoa H^2 = H"
-    assert np.allclose(H, H.T, atol=1e-8), "Hat matrix khong doi xung"
+    # Kiểm tra idempotent: H² = H
+    H2 = mat_mul(H, H)
+    for i in range(n):
+        for j in range(n):
+            assert abs(H2[i][j] - H[i][j]) < 1e-8, "Hat matrix khong thoa H^2 = H"
 
-    expected_rank = X.shape[1]
-    actual_rank = int(np.round(np.trace(H)))
-    assert actual_rank == expected_rank, (
-        f"rank(H) = {actual_rank}, ky vong {expected_rank}"
-    )
+    # Kiểm tra đối xứng: Hᵀ = H
+    Ht = transpose(H)
+    for i in range(n):
+        for j in range(n):
+            assert abs(H[i][j] - Ht[i][j]) < 1e-8, "Hat matrix khong doi xung"
 
-    eigenvalues = np.linalg.eigvalsh(H)
-    assert np.all(
-        (eigenvalues < 1e-8) | (eigenvalues > 1 - 1e-8)
-    ), "Gia tri rieng cua H nam ngoai {0, 1}"
+    # Kiểm tra trace(H) = rank = k = p+1
+    actual_rank = round(sum(H[i][i] for i in range(n)))
+    assert actual_rank == k, f"rank(H) = {actual_rank}, ky vong {k}"
 
     return H
 
@@ -120,7 +344,7 @@ def hat_matrix(X: np.ndarray) -> np.ndarray:
 # 3. Model Metrics
 # ---------------------------------------------------------------------------
 
-def model_metrics(y: np.ndarray, y_hat: np.ndarray, p: int) -> dict:
+def model_metrics(y, y_hat, p):
     """
     Tính các chỉ số đánh giá mô hình hồi quy.
 
@@ -133,42 +357,39 @@ def model_metrics(y: np.ndarray, y_hat: np.ndarray, p: int) -> dict:
 
     Tham số
     -------
-    y     : ndarray (n,) — giá trị thực
-    y_hat : ndarray (n,) — giá trị fitted
-    p     : int          — số biến dự báo (không tính intercept)
+    y     : list (n,) — giá trị thực
+    y_hat : list (n,) — giá trị fitted
+    p     : int       — số biến dự báo (không tính intercept)
 
     Trả về
     ------
     dict: rss, tss, r2, r2_adj, f_stat, f_pvalue, n
     """
-    y = np.asarray(y, dtype=float)
-    y_hat = np.asarray(y_hat, dtype=float)
-    n = len(y)
+    n      = len(y)
+    mean_y = sum(y) / n
 
-    rss = float(np.sum((y - y_hat) ** 2))
-    tss = float(np.sum((y - np.mean(y)) ** 2))
+    rss = sum((y[i] - y_hat[i]) ** 2 for i in range(n))
+    tss = sum((y[i] - mean_y)    ** 2 for i in range(n))
 
-    r2 = 1.0 - rss / tss
+    r2     = 1.0 - rss / tss
     r2_adj = 1.0 - (n - 1) / (n - p - 1) * (1.0 - r2)
 
-    # F-statistic: H₀: β₁ = … = βₚ = 0
-    rss_denominator = rss / (n - p - 1)
-    if rss_denominator < 1e-15:
-        # Perfect fit: F -> infinity, p-value -> 0
-        f_stat = np.inf
-        f_pvalue = 0.0
+    rss_denom = rss / (n - p - 1)
+    if p == 0 or rss_denom < 1e-15:
+        f_stat   = math.inf if rss_denom < 1e-15 else math.nan
+        f_pvalue = 0.0      if rss_denom < 1e-15 else math.nan
     else:
-        f_stat = ((tss - rss) / p) / rss_denominator
-        f_pvalue = float(1.0 - stats.f.cdf(f_stat, dfn=p, dfd=n - p - 1))
+        f_stat   = ((tss - rss) / p) / rss_denom
+        f_pvalue = 1.0 - f_cdf(f_stat, dfn=p, dfd=n - p - 1)
 
     return {
-        "n": n,
-        "p": p,
-        "rss": rss,
-        "tss": tss,
-        "r2": r2,
-        "r2_adj": r2_adj,
-        "f_stat": f_stat,
+        "n":        n,
+        "p":        p,
+        "rss":      rss,
+        "tss":      tss,
+        "r2":       r2,
+        "r2_adj":   r2_adj,
+        "f_stat":   f_stat,
         "f_pvalue": f_pvalue,
     }
 
@@ -177,13 +398,7 @@ def model_metrics(y: np.ndarray, y_hat: np.ndarray, p: int) -> dict:
 # 4. Coefficient Inference
 # ---------------------------------------------------------------------------
 
-def coef_inference(
-    X: np.ndarray,
-    y: np.ndarray,
-    beta_hat: np.ndarray,
-    sigma2: float,
-    alpha: float = 0.05,
-) -> dict:
+def coef_inference(X, y, beta_hat, sigma2, alpha=0.05):
     """
     Suy luận thống kê cho từng hệ số hồi quy.
 
@@ -195,45 +410,46 @@ def coef_inference(
 
     Tham số
     -------
-    X        : ndarray (n, p+1)
-    y        : ndarray (n,)
-    beta_hat : ndarray (p+1,)
-    sigma2   : float             — σ̂² từ ols_fit
-    alpha    : float             — mức ý nghĩa (mặc định 0.05)
+    X        : list of lists (n, p+1)
+    y        : list (n,)
+    beta_hat : list (p+1,)
+    sigma2   : float  — σ̂² từ ols_fit
+    alpha    : float  — mức ý nghĩa (mặc định 0.05)
 
     Trả về
     ------
     dict: se, t_stats, p_values, ci_lower, ci_upper, cov_beta
     """
-    X = np.asarray(X, dtype=float)
-    y = np.asarray(y, dtype=float)
-    beta_hat = np.asarray(beta_hat, dtype=float)
-
-    n, k = X.shape
-    p = k - 1
+    n = len(X)
+    k = len(X[0])
+    p  = k - 1
     df = n - p - 1
 
-    XtX_inv = np.linalg.inv(X.T @ X)
-    cov_beta = sigma2 * XtX_inv                          # Var(β̂) = σ²(XᵀX)⁻¹
-    se = np.sqrt(np.diag(cov_beta))                      # standard errors
+    Xt       = transpose(X)
+    XtX      = mat_mul(Xt, X)
+    XtX_inv  = mat_inv(XtX)
+    cov_beta = scalar_mat_mul(sigma2, XtX_inv)
 
-    t_stats = beta_hat / se
-    p_values = 2.0 * (1.0 - stats.t.cdf(np.abs(t_stats), df=df))
+    diag     = mat_diag(cov_beta)
+    se       = [math.sqrt(d) for d in diag]
 
-    t_crit = stats.t.ppf(1.0 - alpha / 2, df=df)
-    ci_lower = beta_hat - t_crit * se
-    ci_upper = beta_hat + t_crit * se
+    t_stats  = [beta_hat[j] / se[j] for j in range(k)]
+    p_values = [2.0 * (1.0 - t_cdf(abs(t_stats[j]), df=df)) for j in range(k)]
+
+    t_crit   = t_ppf(1.0 - alpha / 2, df=df)
+    ci_lower = [beta_hat[j] - t_crit * se[j] for j in range(k)]
+    ci_upper = [beta_hat[j] + t_crit * se[j] for j in range(k)]
 
     return {
         "beta_hat": beta_hat,
-        "se": se,
-        "t_stats": t_stats,
+        "se":       se,
+        "t_stats":  t_stats,
         "p_values": p_values,
         "ci_lower": ci_lower,
         "ci_upper": ci_upper,
         "cov_beta": cov_beta,
-        "df": df,
-        "alpha": alpha,
+        "df":       df,
+        "alpha":    alpha,
     }
 
 
@@ -241,7 +457,7 @@ def coef_inference(
 # 5. Variance Inflation Factor (VIF)
 # ---------------------------------------------------------------------------
 
-def vif(X: np.ndarray) -> np.ndarray:
+def vif(X):
     """
     Tính Variance Inflation Factor (VIF) cho từng biến dự báo.
 
@@ -253,39 +469,40 @@ def vif(X: np.ndarray) -> np.ndarray:
 
     Tham số
     -------
-    X : ndarray, shape (n, p+1)
+    X : list of lists, shape (n, p+1)
         Ma trận design (cột đầu là intercept toàn 1).
         Chỉ tính VIF cho p cột biến dự báo (bỏ cột intercept).
 
     Trả về
     ------
-    vif_values : ndarray (p,)  — VIF của từng biến dự báo (index 1..p)
+    vif_values : list (p,) — VIF của từng biến dự báo (index 1..p)
     """
-    X = np.asarray(X, dtype=float)
-    n, k = X.shape
+    n = len(X)
+    k = len(X[0])
+    p = k - 1
 
-    # Bỏ cột intercept (cột 0), lấy các cột biến dự báo
-    predictors = X[:, 1:]
-    p = predictors.shape[1]
+    # Lấy chỉ các cột biến dự báo (bỏ cột intercept)
+    predictors = [row[1:] for row in X]
 
-    vif_values = np.zeros(p)
+    vif_values = []
     for j in range(p):
-        # Xⱼ là biến mục tiêu, phần còn lại là features
-        y_j = predictors[:, j]
-        X_j = np.delete(predictors, j, axis=1)
+        y_j = [predictors[i][j] for i in range(n)]
+        X_j = mat_del_col(predictors, j)
 
-        # Thêm intercept
-        X_j_with_const = np.column_stack([np.ones(n), X_j])
+        # Khi chỉ có 1 predictor, sau khi xoá không còn biến nào để hồi quy
+        if not X_j or not X_j[0]:
+            vif_values.append(1.0)
+            continue
 
-        result = ols_fit(X_j_with_const, y_j)
-        metrics = model_metrics(y_j, result["y_hat"], p=X_j.shape[1])
-        r2_j = metrics["r2"]
+        X_j_design = column_stack(create_ones(n), X_j)
+        result     = ols_fit(X_j_design, y_j)
+        p_j        = len(X_j[0])
+        metrics    = model_metrics(y_j, result["y_hat"], p=p_j)
+        r2_j       = metrics["r2"]
 
-        # Tránh chia cho 0 khi R² = 1 (perfect multicollinearity)
         if r2_j >= 1.0 - 1e-10:
-            vif_values[j] = np.inf
+            vif_values.append(math.inf)
         else:
-            vif_values[j] = 1.0 / (1.0 - r2_j)
+            vif_values.append(1.0 / (1.0 - r2_j))
 
     return vif_values
-
