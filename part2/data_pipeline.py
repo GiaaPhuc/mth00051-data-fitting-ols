@@ -1,0 +1,114 @@
+import pandas as pd
+import numpy as np
+
+
+class DataPipeline:
+    """
+    Một pipeline tiền xử lý dữ liệu cho các mô hình Hồi quy Tuyến tính (OLS, Ridge, Lasso).
+    Pipeline thực hiện các nhiệm vụ sau một cách tuần tự:
+    1. Lọc và phân loại các biến liên tục (numerical) và biến phân loại (categorical).
+    2. Xử lý dữ liệu khuyết thiếu (Missing Values Imputation).
+    3. Mã hoá biến phân loại thành biến giả (One-Hot Encoding).
+    4. Chuẩn hoá các biến liên tục (Z-score Standardization).
+
+    Attributes:
+        impute_num (str): Chiến lược điền khuyết cho biến số ('mean' hoặc 'median').
+        impute_cat (str): Chiến lược điền khuyết cho biến phân loại ('mode').
+        impute_values (dict): Từ điển lưu trữ các giá trị điền khuyết đã học.
+        num_features (list): Danh sách tên các cột chứa dữ liệu số.
+        cat_features (list): Danh sách tên các cột chứa dữ liệu phân loại.
+        scaling_params (dict): Từ điển lưu trữ giá trị Mean và Std của từng cột số.
+    """
+
+    def __init__(self, impute_num='mean', impute_cat='mode'):
+        self.impute_num = impute_num
+        self.impute_cat = impute_cat
+        self.impute_values = {}
+        self.num_features = []
+        self.cat_features = []
+        self.scaling_params = {}
+
+    def fit(self, X: pd.DataFrame, y=None):
+        """
+        Khảo sát tập huấn luyện (Train set) để tính toán và lưu trữ các tham số 
+        cần thiết (giá trị thay thế, trung bình, độ lệch chuẩn).
+
+        Args:
+            X (pd.DataFrame): Tập dữ liệu huấn luyện.
+            y (ignored): Bỏ qua (chỉ giữ lại để đồng nhất API theo chuẩn scikit-learn).
+
+        Returns:
+            self: Trả về chính đối tượng DataPipeline sau khi đã lưu thông số.
+        """
+        # Phân loại biến liên tục và biến phân loại
+        self.num_features = X.select_dtypes(include=[np.number]).columns.tolist()
+        self.cat_features = X.select_dtypes(exclude=[np.number]).columns.tolist()
+
+        # Tính toán giá trị điền khuyết cho biến liên tục
+        for col in self.num_features:
+            if self.impute_num == 'mean':
+                self.impute_values[col] = X[col].mean()
+            elif self.impute_num == 'median':
+                self.impute_values[col] = X[col].median()
+
+        # Tính toán giá trị điền khuyết cho biến phân loại
+        for col in self.cat_features:
+            if self.impute_cat == 'mode':
+                self.impute_values[col] = X[col].mode()[0]
+
+        # Tính toán các tham số chuẩn hoá (Mean, Std)
+        for col in self.num_features:
+            self.scaling_params[col] = {
+                'mean': X[col].mean(),
+                'std': X[col].std()
+            }
+            
+        return self
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        """
+        Áp dụng các tham số đã học từ hàm `fit` để biến đổi một tập dữ liệu bất kỳ.
+
+        Args:
+            X (pd.DataFrame): Tập dữ liệu cần được biến đổi (Train hoặc Test set).
+
+        Returns:
+            pd.DataFrame: Tập dữ liệu đã được làm sạch, mã hoá và chuẩn hoá hoàn chỉnh.
+        """
+        # Bước 1: Tạo bản sao để bảo toàn dữ liệu gốc
+        X_transformed = X.copy()
+
+        # Bước 2: Điền khuyết dữ liệu
+        X_transformed = X_transformed.fillna(self.impute_values)
+
+        # Bước 3: Categorical Encoding (One-Hot Encoding)
+        # Tham số drop_first=True được sử dụng để loại bỏ bớt một biến giả,
+        # qua đó ngăn chặn hiện tượng đa cộng tuyến hoàn hảo (Perfect Multicollinearity).
+        X_transformed = pd.get_dummies(
+            X_transformed, columns=self.cat_features, drop_first=True
+        )
+
+        # Bước 4: Chuẩn hoá Z-score cho biến liên tục
+        for col in self.num_features:
+            mean = self.scaling_params[col]['mean']
+            std = self.scaling_params[col]['std']
+            
+            # Ngăn chặn lỗi chia cho 0 trong trường hợp cột có phương sai bằng 0
+            X_transformed[col] = (X_transformed[col] - mean) / std if std != 0 else 0.0
+
+        return X_transformed
+
+    def fit_transform(self, X: pd.DataFrame, y=None) -> pd.DataFrame:
+        """
+        Tiện ích gộp chung hai bước fit và transform.
+        Thường được gọi duy nhất 1 lần trên tập Train.
+
+        Args:
+            X (pd.DataFrame): Tập dữ liệu huấn luyện.
+            y (ignored): Bỏ qua.
+
+        Returns:
+            pd.DataFrame: Tập dữ liệu huấn luyện đã được biến đổi.
+        """
+        self.fit(X, y)
+        return self.transform(X)
