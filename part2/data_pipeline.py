@@ -18,6 +18,8 @@ class DataPipeline:
         num_features (list): Danh sách tên các cột chứa dữ liệu số.
         cat_features (list): Danh sách tên các cột chứa dữ liệu phân loại.
         scaling_params (dict): Từ điển lưu trữ giá trị Mean và Std của từng cột số.
+        dummy_columns_ (list): Danh sách tên tất cả các cột sau khi One-Hot Encoding trên
+            tập train. Dùng để căn chỉnh (align) tập test về cùng cấu trúc cột.
     """
 
     def __init__(self, impute_num='mean', impute_cat='mode'):
@@ -27,6 +29,7 @@ class DataPipeline:
         self.num_features = []
         self.cat_features = []
         self.scaling_params = {}
+        self.dummy_columns_ = []  # Được gán sau khi fit()
 
     def fit(self, X: pd.DataFrame, y=None):
         """
@@ -62,7 +65,13 @@ class DataPipeline:
                 'mean': X[col].mean(),
                 'std': X[col].std()
             }
-            
+
+        # Ghi nhớ cấu trúc cột sau One-Hot Encoding trên tập train.
+        # Mục đích: đảm bảo tập test luôn có cùng tập cột với tập train
+        # (xử lý trường hợp test set có category mới hoặc thiếu category).
+        X_dummy = pd.get_dummies(X, columns=self.cat_features, drop_first=True)
+        self.dummy_columns_ = X_dummy.columns.tolist()
+
         return self
 
     def transform(self, X: pd.DataFrame) -> pd.DataFrame:
@@ -84,8 +93,28 @@ class DataPipeline:
         # Bước 3: Categorical Encoding (One-Hot Encoding)
         # Tham số drop_first=True được sử dụng để loại bỏ bớt một biến giả,
         # qua đó ngăn chặn hiện tượng đa cộng tuyến hoàn hảo (Perfect Multicollinearity).
+        #
+        # ⚠️  Hạn chế đã biết của pd.get_dummies():
+        #   pd.get_dummies() tạo cột dựa trên các category *thực sự xuất hiện* trong
+        #   tập dữ liệu được truyền vào. Nếu tập test chứa category chưa từng thấy
+        #   trong tập train, get_dummies sẽ tạo ra các cột dư thừa → số cột lệch nhau
+        #   → mô hình báo lỗi khi predict. Ngược lại, nếu tập test thiếu một category,
+        #   cột tương ứng sẽ không được tạo ra → cũng gây lệch cột.
+        #
+        #   Giải pháp triệt để hơn là dùng sklearn.preprocessing.OneHotEncoder
+        #   (lưu mapping từ fit, áp dụng nhất quán khi transform). Tuy nhiên, với
+        #   bộ dữ liệu này (train/test cùng phân phối, split ngẫu nhiên), rủi ro
+        #   xuất hiện category mới là rất thấp. Ta xử lý bằng cách căn chỉnh cột
+        #   theo danh sách đã lưu từ fit(): cột thừa bị loại, cột thiếu được điền 0.
         X_transformed = pd.get_dummies(
             X_transformed, columns=self.cat_features, drop_first=True
+        )
+
+        # Căn chỉnh cột về đúng cấu trúc của tập train:
+        #   - fill_value=0: cột thiếu (category không xuất hiện trong test) → điền 0
+        #   - Cột thừa (category mới trong test)          → tự động bị loại bỏ
+        X_transformed = X_transformed.reindex(
+            columns=self.dummy_columns_, fill_value=0
         )
 
         # Bước 4: Chuẩn hoá Z-score cho biến liên tục
