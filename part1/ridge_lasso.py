@@ -153,10 +153,15 @@ def ridge_fit(X: list, y: list, lam: float) -> dict:
 def lasso_fit(X: list, y: list, lam: float, tol: float = 1e-4, max_iter: int = 1000) -> dict:
     """Estimates Lasso Regression coefficients (L1 regularization) using Coordinate Descent.
 
+    Minimizes: ||y - X*beta||^2 + lam * ||beta||_1
+
+    The gradient of the quadratic term w.r.t. beta_j is -2*rho_j + 2*z_j*beta_j,
+    so the soft-thresholding threshold is `lam` (not lam/2).
+
     Args:
         X (list): Design matrix (list of lists).
         y (list): Target vector.
-        lam (float): Regularization parameter.
+        lam (float): Regularization parameter (lambda in the loss function above).
         tol (float): Convergence tolerance.
         max_iter (int): Maximum iterations.
 
@@ -188,7 +193,9 @@ def lasso_fit(X: list, y: list, lam: float, tol: float = 1e-4, max_iter: int = 1
     z = [sum(X_std[i][j]**2 for i in range(n)) for j in range(k)]
     
     iterations = 0
-    alpha = lam / 2.0
+    # Soft-thresholding threshold: loss = ||y - Xβ||² + lam*||β||₁
+    # Gradient of quadratic term = -2*rho_j + 2*z_j*beta_j  →  threshold = lam
+    alpha = lam
     for it in range(max_iter):
         iterations += 1
         beta_old = beta_std[:]
