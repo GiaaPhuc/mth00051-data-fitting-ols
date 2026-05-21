@@ -44,8 +44,10 @@ class DataPipeline:
             self: Trả về chính đối tượng DataPipeline sau khi đã lưu thông số.
         """
         # Phân loại biến liên tục và biến phân loại
-        self.num_features = X.select_dtypes(include=[np.number]).columns.tolist()
-        self.cat_features = X.select_dtypes(exclude=[np.number]).columns.tolist()
+        self.num_features = X.select_dtypes(
+            include=[np.number]).columns.tolist()
+        self.cat_features = X.select_dtypes(
+            exclude=[np.number]).columns.tolist()
 
         # Tính toán giá trị điền khuyết cho biến liên tục
         for col in self.num_features:
@@ -93,19 +95,7 @@ class DataPipeline:
         # Bước 3: Categorical Encoding (One-Hot Encoding)
         # Tham số drop_first=True được sử dụng để loại bỏ bớt một biến giả,
         # qua đó ngăn chặn hiện tượng đa cộng tuyến hoàn hảo (Perfect Multicollinearity).
-        #
-        # ⚠️  Hạn chế đã biết của pd.get_dummies():
-        #   pd.get_dummies() tạo cột dựa trên các category *thực sự xuất hiện* trong
-        #   tập dữ liệu được truyền vào. Nếu tập test chứa category chưa từng thấy
-        #   trong tập train, get_dummies sẽ tạo ra các cột dư thừa → số cột lệch nhau
-        #   → mô hình báo lỗi khi predict. Ngược lại, nếu tập test thiếu một category,
-        #   cột tương ứng sẽ không được tạo ra → cũng gây lệch cột.
-        #
-        #   Giải pháp triệt để hơn là dùng sklearn.preprocessing.OneHotEncoder
-        #   (lưu mapping từ fit, áp dụng nhất quán khi transform). Tuy nhiên, với
-        #   bộ dữ liệu này (train/test cùng phân phối, split ngẫu nhiên), rủi ro
-        #   xuất hiện category mới là rất thấp. Ta xử lý bằng cách căn chỉnh cột
-        #   theo danh sách đã lưu từ fit(): cột thừa bị loại, cột thiếu được điền 0.
+
         X_transformed = pd.get_dummies(
             X_transformed, columns=self.cat_features, drop_first=True
         )
@@ -121,9 +111,10 @@ class DataPipeline:
         for col in self.num_features:
             mean = self.scaling_params[col]['mean']
             std = self.scaling_params[col]['std']
-            
+
             # Ngăn chặn lỗi chia cho 0 trong trường hợp cột có phương sai bằng 0
-            X_transformed[col] = (X_transformed[col] - mean) / std if std != 0 else 0.0
+            X_transformed[col] = (X_transformed[col] -
+                                  mean) / std if std != 0 else 0.0
 
         return X_transformed
 
