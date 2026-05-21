@@ -225,3 +225,6 @@ automobile/
 test_ols_implementation.py
 
 detail.md
+test/
+Reports/
+plans/
