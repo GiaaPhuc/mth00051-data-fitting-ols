@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 # Dùng để lấy phân vị của phân phối chuẩn
 from scipy import stats
 
-#HÀM BỔ TRỢ MA TRẬN (CORE LOGIC)
+#HÀM BỔ TRỢ MA TRẬN
 def transpose(A):
     """Chuyển vị ma trận."""
     return [[A[j][i] for j in range(len(A))] for i in range(len(A[0]))]
