@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 # Dùng để lấy phân vị của phân phối chuẩn
 from scipy import stats
 
-#HÀM BỔ TRỢ MA TRẬN (CORE LOGIC)
+#HÀM BỔ TRỢ MA TRẬN
 def transpose(A):
     """Chuyển vị ma trận."""
     return [[A[j][i] for j in range(len(A))] for i in range(len(A[0]))]
@@ -118,32 +118,3 @@ def task_9_monte_carlo(n_sim = 1000):
     plt.axvline(true_b1, color='red', label='True Beta')
     plt.title("Phân phối của Beta_1 (Minh họa Gauss-Markov)")
     plt.show()
-
-# PHẦN TEST: CHẠY CẢ TASK 7 VÀ TASK 9
-if __name__ == "__main__":
-    print("--- Đang bắt đầu quá trình kiểm tra (Testing) ---")
-
-    # --- TEST TASK 7 ---
-    print("\n[1/2] Đang chạy Task 7: Vẽ biểu đồ chẩn đoán (Residual Plots)...")
-    # Tạo dữ liệu giả lập có chủ đích (có nhiễu chuẩn)
-    random.seed(42)
-    x_test = [i * 0.5 for i in range(40)]
-    # y = 2 + 3x + nhiễu
-    y_test = [2 + 3 * xi + random.gauss(0, 1) for xi in x_test]
-    
-    # Chuẩn bị ma trận X (thêm cột 1 cho Intercept)
-    X_matrix_test = [[1.0, xi] for xi in x_test]
-    
-    # Tính beta bằng cách giải hệ phương trình (X'X)beta = X'y
-    XT_test = transpose(X_matrix_test)
-    XTX_inv_test = matrix_inverse(matmul(XT_test, X_matrix_test))
-    XTy_test = matmul(XT_test, y_test)
-    beta_hat_test = matmul(XTX_inv_test, XTy_test)
-    
-    print(f"Hệ số ước lượng được: Beta_0 = {beta_hat_test[0]:.4f}, Beta_1 = {beta_hat_test[1]:.4f}")
-    task_7_residual_analysis(X_matrix_test, y_test, beta_hat_test)
-    print("\n[2/2] Đang chạy Task 9: Mô phỏng Monte Carlo (Gauss-Markov)...")
-    # Chạy mô phỏng 1000 lần
-    task_9_monte_carlo(n_sim=1000)
-
-    print("\n--- Hoàn thành tất cả các bài test! ---")

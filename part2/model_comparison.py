@@ -30,6 +30,11 @@ from part1.ridge_lasso import lasso_fit, ridge_fit
 
 SelectionMethod = Literal["pvalue", "vif"]
 
+DEFAULT_TARGET = "price"
+AUTOMOBILE_DATA_PATH = Path(__file__).resolve().parent / "data" / "automobile.csv"
+MAX_SELECTION_FEATURES = 40
+RANK_TOL = 1e-10
+
 
 def _to_list_2d(X: pd.DataFrame | np.ndarray) -> list[list[float]]:
     """Chuyển DataFrame/ndarray thành list of lists."""
@@ -43,6 +48,97 @@ def _to_list_1d(y: pd.Series | np.ndarray | Sequence[float]) -> list[float]:
     if isinstance(y, pd.Series):
         return y.values.ravel().tolist()
     return np.asarray(y, dtype=float).ravel().tolist()
+
+
+def drop_duplicate_columns(
+    X_train: pd.DataFrame, X_test: pd.DataFrame
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Loại cột trùng lặp (one-hot có thể sinh cột giống hệt) theo tập train.
+
+    Giữ nguyên thứ tự cột train; test được căn theo cùng tập cột.
+    """
+    keep_mask = ~X_train.T.duplicated()
+    kept_cols = X_train.columns[keep_mask]
+    return X_train.loc[:, kept_cols], X_test.reindex(columns=kept_cols, fill_value=0)
+
+
+def _predictor_matrix(X: list[list[float]]) -> np.ndarray:
+    """Ma trận predictor (không intercept) từ design matrix."""
+    return np.asarray([row[1:] for row in X], dtype=float)
+
+
+def _feature_correlations_with_y(X: list[list[float]], y: list[float]) -> list[float]:
+    """|corr(x_j, y)| cho từng predictor; NaN → 0."""
+    X_np = _predictor_matrix(X)
+    y_np = np.asarray(y, dtype=float)
+    corrs: list[float] = []
+    for j in range(X_np.shape[1]):
+        x_j = X_np[:, j]
+        if np.std(x_j) < 1e-12 or np.std(y_np) < 1e-12:
+            corrs.append(0.0)
+            continue
+        corr = np.corrcoef(x_j, y_np)[0, 1]
+        corrs.append(abs(float(corr)) if np.isfinite(corr) else 0.0)
+    return corrs
+
+
+def _try_ols_fit(X: list[list[float]], y: list[float]) -> bool:
+    """Trả về True nếu ols_fit chạy được (n > p + 1 và X không suy biến)."""
+    n = len(y)
+    p = len(X[0]) - 1
+    if p >= n - 1:
+        return False
+    try:
+        ols_fit(X, y)
+        return True
+    except (ValueError, ZeroDivisionError):
+        return False
+
+
+def _cap_by_correlation(
+    X: list[list[float]], y: list[float], active: list[int], max_features: int
+) -> list[int]:
+    """Giữ tối đa max_features biến có |corr(y)| cao nhất."""
+    if len(active) <= max_features:
+        return active
+    corrs = _feature_correlations_with_y(X, y)
+    ranked = sorted(active, key=lambda idx: -corrs[idx])
+    return ranked[:max_features]
+
+
+def _design_rank(X_sub: np.ndarray) -> int:
+    """Rank ma trận design (numpy, nhanh hơn ols_fit lặp)."""
+    return int(np.linalg.matrix_rank(X_sub, tol=RANK_TOL))
+
+
+def reduce_to_identifiable_features(
+    X: list[list[float]], y: list[float], active: list[int] | None = None
+) -> list[int]:
+    """
+    Chọn tập biến lớn nhất (full rank) với p ≤ n−2 để OLS khả thi.
+
+    Dùng greedy forward + kiểm tra rank bằng numpy (phù hợp Automobile: n≈160, p>200).
+    """
+    n = len(y)
+    max_p = max(1, n - 2)
+    X_np = _predictor_matrix(X)
+    n_predictors = X_np.shape[1]
+    active = list(range(n_predictors)) if active is None else list(active)
+
+    corrs = _feature_correlations_with_y(X, y)
+    candidates = sorted(active, key=lambda idx: -corrs[idx])
+
+    selected: list[int] = []
+    for idx in candidates:
+        if len(selected) >= max_p:
+            break
+        trial = selected + [idx]
+        X_sub = np.column_stack([np.ones(n), X_np[:, trial]])
+        if _design_rank(X_sub) == len(trial) + 1:
+            selected = trial
+
+    return selected
 
 
 def to_design_matrix(X: pd.DataFrame | np.ndarray) -> list[list[float]]:
@@ -111,35 +207,62 @@ def select_features_by_pvalue(
     """
     Backward elimination: loại dần biến có p-value lớn nhất cho đến khi
     tất cả biến còn lại có p-value ≤ alpha (kiểm định t trên tập train).
+
+    Với p lớn (Automobile): tự giảm rank trước khi loại theo p-value.
     """
     n_predictors = len(X[0]) - 1
-    active = list(range(n_predictors))
+    active = reduce_to_identifiable_features(X, y, list(range(n_predictors)))
+    active = _cap_by_correlation(
+        X, y, active, min(MAX_SELECTION_FEATURES, max(1, len(y) - 2))
+    )
 
-    while active:
+    while len(active) > 1:
         X_sub = subset_design_matrix(X, active)
+        if not _try_ols_fit(X_sub, y):
+            active = reduce_to_identifiable_features(X, y, active)
+            if not active:
+                break
+            continue
+
         fit = ols_fit(X_sub, y)
         inference = coef_inference(X_sub, y, fit["beta_hat"], fit["sigma2"], alpha=alpha)
         p_values = inference["p_values"][1:]
 
-        worst = max(range(len(p_values)), key=lambda i: p_values[i])
-        if p_values[worst] <= alpha:
+        worst_local = max(range(len(p_values)), key=lambda i: p_values[i])
+        if p_values[worst_local] <= alpha:
             break
-        active.pop(worst)
+        active.pop(worst_local)
 
     return active
 
 
 def select_features_by_vif(
-    X: list[list[float]], threshold: float = 10.0
+    X: list[list[float]], threshold: float = 10.0, y: list[float] | None = None
 ) -> list[int]:
     """
     Loại dần biến có VIF cao nhất cho đến khi mọi VIF ≤ threshold.
+
+    Tham số y (tùy chọn) dùng để giảm rank khi p ≥ n trước khi tính VIF.
     """
     n_predictors = len(X[0]) - 1
-    active = list(range(n_predictors))
+    if y is None:
+        active = list(range(n_predictors))
+    else:
+        active = reduce_to_identifiable_features(X, y, list(range(n_predictors)))
+        active = _cap_by_correlation(
+            X, y, active, min(MAX_SELECTION_FEATURES, max(1, len(y) - 2))
+        )
 
     while active:
         X_sub = subset_design_matrix(X, active)
+        if not _try_ols_fit(X_sub, y if y is not None else [0.0] * len(X_sub)):
+            if y is None:
+                raise ValueError("Ma trận suy biến; truyền y để giảm rank tự động.")
+            active = reduce_to_identifiable_features(X, y, active)
+            if not active:
+                break
+            continue
+
         vif_values = vif(X_sub)
         max_vif = max(vif_values)
 
@@ -152,7 +275,16 @@ def select_features_by_vif(
     return active
 
 
-def _make_regularized_model_fn(method: str, lam: float) -> Callable:
+def _default_lambda_grid(n_predictors: int) -> list[float]:
+    """Lưới λ: thu gọn khi số biến lớn (Automobile sau one-hot)."""
+    if n_predictors > MAX_SELECTION_FEATURES:
+        return [0.1, 1.0, 10.0, 100.0]
+    return [10.0 ** exp for exp in range(-3, 4)]
+
+
+def _make_regularized_model_fn(
+    method: str, lam: float, max_lasso_iter: int = 1000
+) -> Callable:
     """Tạo hàm model_fn cho kfold_cv với Ridge hoặc Lasso."""
 
     def model_fn(X_train: np.ndarray, y_train: np.ndarray) -> np.ndarray:
@@ -161,7 +293,7 @@ def _make_regularized_model_fn(method: str, lam: float) -> Callable:
         if method == "ridge":
             result = ridge_fit(X_list, y_list, lam)
         elif method == "lasso":
-            result = lasso_fit(X_list, y_list, lam)
+            result = lasso_fit(X_list, y_list, lam, max_iter=max_lasso_iter)
         else:
             raise ValueError("method phải là 'ridge' hoặc 'lasso'.")
         return np.asarray(result["beta_hat"], dtype=float)
@@ -176,6 +308,7 @@ def tune_lambda_cv(
     lambdas: Sequence[float] | None = None,
     k: int = 5,
     seed: int = 42,
+    max_lasso_iter: int = 1000,
 ) -> tuple[float, float]:
     """
     Chọn siêu tham số λ bằng k-fold cross-validation (MSE trung bình).
@@ -183,8 +316,9 @@ def tune_lambda_cv(
     Returns:
         (best_lambda, best_cv_mse)
     """
+    n_predictors = len(X[0]) - 1
     if lambdas is None:
-        lambdas = [10.0 ** exp for exp in range(-3, 4)]
+        lambdas = _default_lambda_grid(n_predictors)
 
     X_np = np.asarray(X, dtype=float)
     y_np = np.asarray(y, dtype=float)
@@ -193,7 +327,7 @@ def tune_lambda_cv(
     best_score = float("inf")
 
     for lam in lambdas:
-        model_fn = _make_regularized_model_fn(method, float(lam))
+        model_fn = _make_regularized_model_fn(method, float(lam), max_lasso_iter)
         cv_score, _ = kfold_cv(X_np, y_np, k=k, model_fn=model_fn, seed=seed)
         if cv_score < best_score:
             best_score = cv_score
@@ -239,12 +373,13 @@ def compare_models(
     k_folds: int = 5,
     lambda_grid: Sequence[float] | None = None,
     seed: int = 42,
+    drop_duplicates: bool = True,
 ) -> pd.DataFrame:
     """
     So sánh ≥ 3 mô hình và trả về bảng MAE, RMSE, R² trên test set.
 
     Mô hình:
-        - OLS (Full)
+        - OLS (Full) — tối đa hóa số biến khả thi (n > p, full rank)
         - OLS (Selected) — chọn biến theo p-value hoặc VIF
         - Ridge (CV λ)
         - Lasso (CV λ)
@@ -258,23 +393,52 @@ def compare_models(
         k_folds: Số fold cho chọn λ Ridge/Lasso.
         lambda_grid: Lưới λ thử nghiệm (mặc định 10^-3 … 10^3).
         seed: Random seed cho k-fold CV (tái lập kết quả).
+        drop_duplicates: Loại cột trùng sau one-hot (cần cho Automobile).
 
     Returns:
         pd.DataFrame: Bảng so sánh metrics trên test set.
     """
+    if drop_duplicates and isinstance(X_train, pd.DataFrame) and isinstance(X_test, pd.DataFrame):
+        X_train, X_test = drop_duplicate_columns(X_train, X_test)
+
     X_tr = to_design_matrix(X_train)
     X_te = to_design_matrix(X_test)
     y_tr = _to_list_1d(y_train)
     y_te = _to_list_1d(y_test)
 
     results: list[dict] = []
+    n_predictors = len(X_tr[0]) - 1
+    if lambda_grid is None:
+        lambda_grid = _default_lambda_grid(n_predictors)
 
-    # 1. OLS cơ bản — tất cả biến
-    def fit_ols_full(X: list[list[float]], y: list[float]) -> list[float]:
-        return ols_fit(X, y)["beta_hat"]
+    max_p = max(1, len(y_tr) - 2)
+    reg_indices = _cap_by_correlation(
+        X_tr, y_tr, list(range(n_predictors)), min(MAX_SELECTION_FEATURES, max_p)
+    )
+    X_tr_reg = subset_design_matrix(X_tr, reg_indices)
+    X_te_reg = subset_design_matrix(X_te, reg_indices)
+    lasso_max_iter = 200 if n_predictors > MAX_SELECTION_FEATURES else 1000
+
+    # 1. OLS — dùng tập biến lớn nhất mà ma trận không suy biến (p < n)
+    full_indices = reduce_to_identifiable_features(
+        X_tr, y_tr, list(range(n_predictors))
+    )
+    X_tr_full = subset_design_matrix(X_tr, full_indices)
+    X_te_full = subset_design_matrix(X_te, full_indices)
+
+    def fit_ols_full(_X: list[list[float]], y: list[float]) -> list[float]:
+        return ols_fit(X_tr_full, y)["beta_hat"]
 
     results.append(
-        _evaluate_model("OLS (Full)", X_tr, y_tr, X_te, y_te, fit_ols_full)
+        _evaluate_model(
+            "OLS (Full)",
+            X_tr_full,
+            y_tr,
+            X_te_full,
+            y_te,
+            fit_ols_full,
+            extra={"feature_indices": full_indices},
+        )
     )
 
     # 2. OLS chọn biến
@@ -282,7 +446,7 @@ def compare_models(
         selected = select_features_by_pvalue(X_tr, y_tr, alpha=alpha)
         sel_label = f"OLS (Selected, p≤{alpha})"
     else:
-        selected = select_features_by_vif(X_tr, threshold=vif_threshold)
+        selected = select_features_by_vif(X_tr, threshold=vif_threshold, y=y_tr)
         sel_label = f"OLS (Selected, VIF≤{vif_threshold})"
 
     X_tr_sel = subset_design_matrix(X_tr, selected)
@@ -303,43 +467,54 @@ def compare_models(
         )
     )
 
-    # 3. Ridge — chọn λ bằng CV
+    # 3. Ridge — chọn λ bằng CV (dùng tập biến thu gọn khi p lớn)
     ridge_lambda, ridge_cv = tune_lambda_cv(
-        X_tr, y_tr, method="ridge", lambdas=lambda_grid, k=k_folds, seed=seed
+        X_tr_reg,
+        y_tr,
+        method="ridge",
+        lambdas=lambda_grid,
+        k=k_folds,
+        seed=seed,
     )
 
     def fit_ridge(_X: list[list[float]], y: list[float]) -> list[float]:
-        return ridge_fit(X_tr, y, ridge_lambda)["beta_hat"]
+        return ridge_fit(X_tr_reg, y, ridge_lambda)["beta_hat"]
 
     results.append(
         _evaluate_model(
             "Ridge (CV λ)",
-            X_tr,
+            X_tr_reg,
             y_tr,
-            X_te,
+            X_te_reg,
             y_te,
             fit_ridge,
-            extra={"lambda": ridge_lambda, "cv_mse": ridge_cv},
+            extra={"lambda": ridge_lambda, "cv_mse": ridge_cv, "feature_indices": reg_indices},
         )
     )
 
     # 4. Lasso — chọn λ bằng CV
     lasso_lambda, lasso_cv = tune_lambda_cv(
-        X_tr, y_tr, method="lasso", lambdas=lambda_grid, k=k_folds, seed=seed
+        X_tr_reg,
+        y_tr,
+        method="lasso",
+        lambdas=lambda_grid,
+        k=k_folds,
+        seed=seed,
+        max_lasso_iter=lasso_max_iter,
     )
 
     def fit_lasso(_X: list[list[float]], y: list[float]) -> list[float]:
-        return lasso_fit(X_tr, y, lasso_lambda)["beta_hat"]
+        return lasso_fit(X_tr_reg, y, lasso_lambda, max_iter=lasso_max_iter)["beta_hat"]
 
     results.append(
         _evaluate_model(
             "Lasso (CV λ)",
-            X_tr,
+            X_tr_reg,
             y_tr,
-            X_te,
+            X_te_reg,
             y_te,
             fit_lasso,
-            extra={"lambda": lasso_lambda, "cv_mse": lasso_cv},
+            extra={"lambda": lasso_lambda, "cv_mse": lasso_cv, "feature_indices": reg_indices},
         )
     )
 
@@ -347,6 +522,57 @@ def compare_models(
     display_cols = ["Model", "MAE", "RMSE", "R2", "n_features"]
     extra_cols = [c for c in df.columns if c not in display_cols]
     return df[display_cols + extra_cols]
+
+
+def load_automobile_splits(
+    data_path: Path | str | None = None,
+    target: str = DEFAULT_TARGET,
+    test_size: float = 0.2,
+    seed: int = 42,
+) -> tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series]:
+    """
+    Đọc automobile.csv, làm sạch missing và chia train/test.
+
+    Returns:
+        X_train, y_train, X_test, y_test (chưa qua DataPipeline).
+    """
+    path = Path(data_path) if data_path is not None else AUTOMOBILE_DATA_PATH
+    df = pd.read_csv(path).replace("?", np.nan)
+    if target not in df.columns:
+        raise ValueError(f"Khong tim thay cot muc tieu '{target}' trong {path.name}.")
+
+    df = df.dropna(subset=[target])
+    X = df.drop(columns=[target])
+    y = df[target].astype(float)
+
+    rng = np.random.default_rng(seed)
+    idx = rng.permutation(len(df))
+    split = max(1, int((1.0 - test_size) * len(df)))
+    train_idx, test_idx = idx[:split], idx[split:]
+
+    return X.iloc[train_idx], y.iloc[train_idx], X.iloc[test_idx], y.iloc[test_idx]
+
+
+def compare_models_on_automobile(
+    data_path: Path | str | None = None,
+    test_size: float = 0.2,
+    seed: int = 42,
+    **compare_kwargs,
+) -> pd.DataFrame:
+    """
+    Pipeline đầy đủ: automobile.csv → DataPipeline → compare_models.
+    """
+    from part2.data_pipeline import DataPipeline
+
+    X_train, y_train, X_test, y_test = load_automobile_splits(
+        data_path=data_path, test_size=test_size, seed=seed
+    )
+    pipeline = DataPipeline()
+    X_tr = pipeline.fit_transform(X_train)
+    X_te = pipeline.transform(X_test)
+    return compare_models(
+        X_tr, y_train, X_te, y_test, seed=seed, **compare_kwargs
+    )
 
 
 def plot_coefficient_importance(
@@ -439,6 +665,40 @@ def test_select_features_by_vif():
     print("test_select_features_by_vif PASSED")
 
 
+def test_reduce_to_identifiable_features():
+    """p > n → giảm còn ≤ n−1 biến và ols_fit thành công."""
+    rng = np.random.default_rng(11)
+    n, p = 50, 80
+    X_raw = rng.normal(size=(n, p))
+    y = (X_raw[:, 0] + rng.normal(scale=0.1, size=n)).tolist()
+    X = to_design_matrix(X_raw)
+
+    active = reduce_to_identifiable_features(X, y)
+    assert len(active) <= n - 2
+    assert _try_ols_fit(subset_design_matrix(X, active), y)
+    print("test_reduce_to_identifiable_features PASSED")
+
+
+def test_drop_duplicate_columns():
+    """Cột trùng sau one-hot bị loại trên train, test được căn cột."""
+    X_train = pd.DataFrame({"a": [1, 2, 3], "b": [1, 2, 3], "c": [4, 5, 6]})
+    X_test = pd.DataFrame({"a": [7, 8], "b": [7, 8], "c": [9, 10]})
+    tr, te = drop_duplicate_columns(X_train, X_test)
+    assert list(tr.columns) == ["a", "c"]
+    assert list(te.columns) == ["a", "c"]
+    print("test_drop_duplicate_columns PASSED")
+
+
+def test_compare_models_automobile():
+    """Integration: compare_models chay duoc tren automobile.csv."""
+    table = compare_models_on_automobile(test_size=0.2, seed=42, k_folds=3)
+    assert len(table) >= 4
+    assert {"MAE", "RMSE", "R2"}.issubset(table.columns)
+    assert table["R2"].notna().all()
+    assert (table["n_features"] > 0).all()
+    print("test_compare_models_automobile PASSED")
+
+
 def test_compare_models_smoke():
     """Smoke test: compare_models chạy được và trả về ≥ 3 dòng."""
     rng = np.random.default_rng(42)
@@ -457,8 +717,6 @@ def test_compare_models_smoke():
     assert {"MAE", "RMSE", "R2"}.issubset(table.columns)
     assert table["R2"].notna().any()
     print("test_compare_models_smoke PASSED")
-    print("\n--- Bảng so sánh mô hình (smoke test) ---")
-    print(table[["Model", "MAE", "RMSE", "R2", "n_features"]].to_string(index=False))
 
 
 def test_tune_lambda_cv():
@@ -479,8 +737,11 @@ if __name__ == "__main__":
     print("--- RUN UNIT TESTS: model_comparison.py ---")
     test_compute_test_metrics_perfect()
     test_compute_test_metrics_known()
+    test_drop_duplicate_columns()
+    test_reduce_to_identifiable_features()
     test_select_features_by_pvalue()
     test_select_features_by_vif()
     test_tune_lambda_cv()
     test_compare_models_smoke()
+    test_compare_models_automobile()
     print("--- ALL TESTS PASSED ---")
