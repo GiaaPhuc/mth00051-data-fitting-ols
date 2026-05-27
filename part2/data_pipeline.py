@@ -10,30 +10,35 @@ class DataPipeline:
     2. Xử lý dữ liệu khuyết thiếu (Missing Values Imputation).
     3. Mã hoá biến phân loại thành biến giả (One-Hot Encoding).
     4. Chuẩn hoá các biến liên tục (Z-score Standardization).
+    5. Loại bỏ cột có phương sai quá thấp (Variance Threshold).
 
     Attributes:
         impute_num (str): Chiến lược điền khuyết cho biến số ('mean' hoặc 'median').
         impute_cat (str): Chiến lược điền khuyết cho biến phân loại ('mode').
+        var_threshold (float): Ngưỡng phương sai tối thiểu; cột có var < ngưỡng bị loại.
         impute_values (dict): Từ điển lưu trữ các giá trị điền khuyết đã học.
         num_features (list): Danh sách tên các cột chứa dữ liệu số.
         cat_features (list): Danh sách tên các cột chứa dữ liệu phân loại.
         scaling_params (dict): Từ điển lưu trữ giá trị Mean và Std của từng cột số.
         dummy_columns_ (list): Danh sách tên tất cả các cột sau khi One-Hot Encoding trên
             tập train. Dùng để căn chỉnh (align) tập test về cùng cấu trúc cột.
+        kept_columns_ (list): Danh sách cột còn lại sau khi lọc phương sai thấp.
     """
 
-    def __init__(self, impute_num='mean', impute_cat='mode'):
-        self.impute_num = impute_num
-        self.impute_cat = impute_cat
+    def __init__(self, impute_num='mean', impute_cat='mode', var_threshold=1e-4):
+        self.impute_num    = impute_num
+        self.impute_cat    = impute_cat
+        self.var_threshold = var_threshold   # Loại cột có phương sai < ngưỡng này
         self.impute_values = {}
-        self.num_features = []
-        self.cat_features = []
+        self.num_features  = []
+        self.cat_features  = []
         self.scaling_params = {}
         self.dummy_columns_ = []  # Được gán sau khi fit()
+        self.kept_columns_  = []  # Cột còn lại sau khi lọc phương sai
 
     def fit(self, X: pd.DataFrame, y=None):
         """
-        Khảo sát tập huấn luyện (Train set) để tính toán và lưu trữ các tham số 
+        Khảo sát tập huấn luyện (Train set) để tính toán và lưu trữ các tham số
         cần thiết (giá trị thay thế, trung bình, độ lệch chuẩn).
 
         Args:
@@ -44,10 +49,8 @@ class DataPipeline:
             self: Trả về chính đối tượng DataPipeline sau khi đã lưu thông số.
         """
         # Phân loại biến liên tục và biến phân loại
-        self.num_features = X.select_dtypes(
-            include=[np.number]).columns.tolist()
-        self.cat_features = X.select_dtypes(
-            exclude=[np.number]).columns.tolist()
+        self.num_features = X.select_dtypes(include=[np.number]).columns.tolist()
+        self.cat_features = X.select_dtypes(exclude=[np.number]).columns.tolist()
 
         # Tính toán giá trị điền khuyết cho biến liên tục
         for col in self.num_features:
@@ -65,14 +68,26 @@ class DataPipeline:
         for col in self.num_features:
             self.scaling_params[col] = {
                 'mean': X[col].mean(),
-                'std': X[col].std()
+                'std':  X[col].std()
             }
+
+        # --- FIX 1: Impute TRƯỚC khi OHE ---
+        # get_dummies cần gọi trên dữ liệu đã điền khuyết để dummy_columns_
+        # phản ánh đúng cấu trúc cột mà transform() sẽ tạo ra.
+        # Nếu gọi get_dummies trên X chưa impute, các hàng có NaN ở cột
+        # categorical sẽ không được gán vào category nào → dummy_columns_ sai.
+        X_filled = X.fillna(self.impute_values)
 
         # Ghi nhớ cấu trúc cột sau One-Hot Encoding trên tập train.
         # Mục đích: đảm bảo tập test luôn có cùng tập cột với tập train
         # (xử lý trường hợp test set có category mới hoặc thiếu category).
-        X_dummy = pd.get_dummies(X, columns=self.cat_features, drop_first=True)
+        X_dummy = pd.get_dummies(X_filled, columns=self.cat_features, drop_first=True)
         self.dummy_columns_ = X_dummy.columns.tolist()
+
+        # Lọc cột có phương sai quá thấp (gần hằng số) để tránh ma trận X^TX suy biến.
+        # Áp dụng cho toàn bộ cột sau OHE (cả số lẫn biến giả).
+        col_vars = X_dummy.var()
+        self.kept_columns_ = col_vars[col_vars >= self.var_threshold].index.tolist()
 
         return self
 
@@ -95,26 +110,41 @@ class DataPipeline:
         # Bước 3: Categorical Encoding (One-Hot Encoding)
         # Tham số drop_first=True được sử dụng để loại bỏ bớt một biến giả,
         # qua đó ngăn chặn hiện tượng đa cộng tuyến hoàn hảo (Perfect Multicollinearity).
-
         X_transformed = pd.get_dummies(
             X_transformed, columns=self.cat_features, drop_first=True
         )
 
         # Căn chỉnh cột về đúng cấu trúc của tập train:
         #   - fill_value=0: cột thiếu (category không xuất hiện trong test) → điền 0
-        #   - Cột thừa (category mới trong test)          → tự động bị loại bỏ
+        #   - Cột thừa (category mới trong test) → tự động bị loại bỏ
         X_transformed = X_transformed.reindex(
             columns=self.dummy_columns_, fill_value=0
         )
 
         # Bước 4: Chuẩn hoá Z-score cho biến liên tục
+        # --- FIX 2: Chuẩn hóa TRƯỚC khi lọc kept_columns_ ---
+        # Nếu lọc trước, cột số có var < threshold sẽ bị xóa nhưng vòng lặp
+        # bên dưới vẫn cố truy cập → KeyError. Chuẩn hóa trước, lọc sau.
+        # Chỉ chuẩn hóa những cột số còn tồn tại trong X_transformed.
         for col in self.num_features:
+            if col not in X_transformed.columns:
+                continue
             mean = self.scaling_params[col]['mean']
-            std = self.scaling_params[col]['std']
+            std  = self.scaling_params[col]['std']
 
-            # Ngăn chặn lỗi chia cho 0 trong trường hợp cột có phương sai bằng 0
-            X_transformed[col] = (X_transformed[col] -
-                                  mean) / std if std != 0 else 0.0
+            # --- FIX 3: Dùng np.where thay vì if-else trên toàn cột ---
+            # Cú pháp `(col - mean) / std if std != 0 else 0.0` gán scalar 0.0
+            # cho toàn Series khi std=0, đúng về kết quả nhưng gây SettingWithCopyWarning.
+            X_transformed[col] = np.where(
+                std != 0,
+                (X_transformed[col] - mean) / std,
+                0.0
+            )
+
+        # Bước 5: Loại bỏ các cột có phương sai quá thấp (đã xác định trong fit).
+        # Tránh ma trận X^TX suy biến khi đưa vào OLS / Ridge / Lasso.
+        if self.kept_columns_:
+            X_transformed = X_transformed[self.kept_columns_]
 
         return X_transformed
 
