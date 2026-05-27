@@ -68,19 +68,15 @@ def mat_vec_mul(A, v):
 
 
 def mat_inv(A):
-    """
-    Nghịch đảo ma trận vuông dùng khử Gauss-Jordan với partial pivoting.
-    Thay thế np.linalg.inv(A).
-    """
     n = len(A)
     I_mat = [[1.0 if i == j else 0.0 for j in range(n)] for i in range(n)]
     aug = [A[i][:] + I_mat[i] for i in range(n)]
     for col in range(n):
         pivot_row = max(range(col, n), key=lambda r: abs(aug[r][col]))
         aug[col], aug[pivot_row] = aug[pivot_row], aug[col]
-        pivot = aug[col][col]
-        if abs(pivot) < 1e-14:
-            raise ValueError(f"Ma trận suy biến tại cột {col}, không thể nghịch đảo.")
+        pivot = aug[col][col] 
+        if abs(pivot) < 1e-12:
+            raise ValueError(f"Ma trận suy biến tại cột {col}, không thể nghịch đảo.")   
         aug[col] = [x / pivot for x in aug[col]]
         for row in range(n):
             if row != col:
@@ -272,6 +268,9 @@ def ols_fit(X, y):
 
     Xt       = transpose(X)
     XtX      = mat_mul(Xt, X)
+    epsilon = 1e-7
+    for i in range(len(XtX)):
+        XtX[i][i] += epsilon
     XtX_inv  = mat_inv(XtX)
     Xty      = mat_vec_mul(Xt, y)
     beta_hat = mat_vec_mul(XtX_inv, Xty)

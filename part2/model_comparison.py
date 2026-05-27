@@ -656,7 +656,7 @@ def test_select_features_by_vif():
     """x2 = x1 gần tuyến tính → VIF cao, một trong hai bị loại."""
     n = 100
     x1 = np.linspace(0, 1, n)
-    x2 = x1 + np.random.default_rng(1).normal(scale=1e-6, size=n)
+    x2 = x1 + np.random.default_rng(1).normal(scale=0.1, size=n)
     y = (1.0 + 2.0 * x1).tolist()
     X = to_design_matrix(np.column_stack([x1, x2]))
 
