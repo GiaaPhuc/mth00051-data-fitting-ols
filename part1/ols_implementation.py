@@ -505,3 +505,115 @@ def vif(X):
             vif_values.append(1.0 / (1.0 - r2_j))
 
     return vif_values
+
+
+# ---------------------------------------------------------------------------
+# UNIT TESTS
+# ---------------------------------------------------------------------------
+
+def test_ols_fit():
+    # Test 1: Simple linear relation y = 1 + 2*x
+    X = [[1.0, 1.0], [1.0, 2.0], [1.0, 3.0]]
+    y = [3.0, 5.0, 7.0]
+    res = ols_fit(X, y)
+    assert abs(res["beta_hat"][0] - 1.0) < 1e-7
+    assert abs(res["beta_hat"][1] - 2.0) < 1e-7
+    assert abs(res["sigma2"]) < 1e-7
+    
+    # Test 2: Perfect fit with multiple features (y = 1 + 2*x1 + 1*x2)
+    X = [[1.0, 1.0, 2.0], [1.0, 2.0, 1.0], [1.0, 3.0, 3.0], [1.0, 4.0, 1.0]]
+    y = [5.0, 6.0, 10.0, 10.0]
+    res = ols_fit(X, y)
+    assert abs(res["beta_hat"][0] - 1.0) < 1e-5
+    assert abs(res["beta_hat"][1] - 2.0) < 1e-5
+    assert abs(res["beta_hat"][2] - 1.0) < 1e-5
+    print("test_ols_fit PASSED")
+
+
+
+
+def test_hat_matrix():
+    # Test 1: Identity/projection matrix for single variable
+    X = [[1.0, 1.0], [1.0, 2.0], [1.0, 3.0]]
+    H = hat_matrix(X)
+    assert abs(H[0][0] - 5/6) < 1e-7
+    assert abs(H[1][1] - 1/3) < 1e-7
+    assert abs(H[2][2] - 5/6) < 1e-7
+    
+    # Test 2: Projection onto 1D constant vector
+    X2 = [[1.0], [1.0]]
+    H2 = hat_matrix(X2)
+    assert abs(H2[0][0] - 0.5) < 1e-7
+    assert abs(H2[0][1] - 0.5) < 1e-7
+    print("test_hat_matrix PASSED")
+
+
+def test_model_metrics():
+    # Test 1: Perfect fit R^2 = 1.0
+    y = [1.0, 2.0, 3.0]
+    y_hat = [1.0, 2.0, 3.0]
+    res = model_metrics(y, y_hat, p=1)
+    assert abs(res["r2"] - 1.0) < 1e-7
+    assert abs(res["rss"]) < 1e-7
+    
+    # Test 2: Known values (TSS=2.0, RSS=0.5, R2=0.75, R2_adj=0.5)
+    y = [1.0, 2.0, 3.0]
+    y_hat = [1.5, 2.0, 2.5]
+    res = model_metrics(y, y_hat, p=1)
+    assert abs(res["r2"] - 0.75) < 1e-7
+    assert abs(res["rss"] - 0.5) < 1e-7
+    assert abs(res["tss"] - 2.0) < 1e-7
+    assert abs(res["r2_adj"] - 0.5) < 1e-7
+    print("test_model_metrics PASSED")
+
+
+def test_coef_inference():
+    # Test 1: Simple linear relation with small noise variance
+    X = [[1.0, 1.0], [1.0, 2.0], [1.0, 3.0]]
+    y = [3.0, 5.0, 7.0]
+    beta_hat = [1.0, 2.0]
+    sigma2 = 0.01
+    res = coef_inference(X, y, beta_hat, sigma2)
+    assert abs(res["se"][0] - math.sqrt(0.07 / 3.0)) < 1e-7
+    assert abs(res["se"][1] - math.sqrt(0.005)) < 1e-7
+
+    
+    # Test 2: Known variance case with noise
+    X = [[1.0, 1.0], [1.0, 2.0], [1.0, 3.0]]
+    y = [2.9, 5.2, 6.9]
+    res = coef_inference(X, y, [1.0, 2.0], 0.06)
+    assert abs(res["se"][0] - math.sqrt(0.14)) < 1e-7
+    assert abs(res["se"][1] - math.sqrt(0.03)) < 1e-7
+    print("test_coef_inference PASSED")
+
+
+def test_vif():
+    # Test 1: Orthogonal predictors -> VIF = 1.0
+    X = [[1.0, 1.0, 0.0], [1.0, -1.0, 0.0], [1.0, 0.0, 1.0], [1.0, 0.0, -1.0]]
+    vif_vals = vif(X)
+    assert abs(vif_vals[0] - 1.0) < 1e-7
+    assert abs(vif_vals[1] - 1.0) < 1e-7
+    
+    # Test 2: Heavily correlated predictors -> VIF > 10.0
+    X = [[1.0, 1.0, 1.01], [1.0, 2.0, 2.01], [1.0, 3.0, 3.01]]
+    vif_vals = vif(X)
+    assert vif_vals[0] > 10.0
+    assert vif_vals[1] > 10.0
+    print("test_vif PASSED")
+
+
+if __name__ == "__main__":
+    import sys
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
+    print("--- RUNNING CORE UNIT TESTS (ols_implementation.py) ---")
+    test_ols_fit()
+    test_hat_matrix()
+    test_model_metrics()
+    test_coef_inference()
+    test_vif()
+
+    print("---------------------------------------------------------")
+
