@@ -91,7 +91,7 @@ def vec_sub(a, b):
 
 
 def vec_sum_sq(v):
-    """Tổng bình phương: Σ vᵢ². Thay thế np.sum(v ** 2)."""
+    """Tổng bình phương: Sum(v_i^2). Thay thế np.sum(v ** 2)."""
     return sum(x * x for x in v)
 
 
@@ -185,8 +185,8 @@ def _betai(a, b, x):
 
 def t_cdf(t_val, df):
     """
-    CDF của phân phối t-Student: P(T ≤ t_val | df).
-    Công thức: dùng I_x(df/2, 1/2) với x = df / (df + t²).
+    CDF của phân phối t-Student: P(T <= t_val | df).
+    Công thức: dùng I_x(df/2, 1/2) với x = df / (df + t^2).
     Thay thế scipy.stats.t.cdf(t_val, df).
     """
     x     = df / (df + t_val * t_val)
@@ -200,7 +200,7 @@ def t_cdf(t_val, df):
 def t_ppf(q, df):
     """
     Quantile (nghịch đảo CDF) của phân phối t-Student.
-    Tìm t sao cho P(T ≤ t | df) = q bằng bisection.
+    Tìm t sao cho P(T <= t | df) = q bằng bisection.
     Thay thế scipy.stats.t.ppf(q, df).
     """
     if q <= 0.0:
@@ -243,8 +243,8 @@ def ols_fit(X, y):
     Ước lượng hệ số OLS và phương sai nhiễu.
 
     Công thức:
-        β̂ = (XᵀX)⁻¹ Xᵀy                          (Normal Equations)
-        σ̂² = RSS / (n − p − 1)                     (unbiased estimator)
+        beta_hat = (X^T X)^-1 X^T y              (Normal Equations)
+        sigma2 = RSS / (n - p - 1)               (unbiased estimator)
 
     Tham số
     -------
@@ -257,9 +257,9 @@ def ols_fit(X, y):
     ------
     dict với các khoá:
         beta_hat  : list (p+1,)  — vector hệ số ước lượng
-        sigma2    : float        — ước lượng phương sai nhiễu σ̂²
+        sigma2    : float        — ước lượng phương sai nhiễu sigma^2
         y_hat     : list (n,)    — giá trị fitted
-        residuals : list (n,)    — phần dư ε̂ = y − ŷ
+        residuals : list (n,)    — phần dư epsilon_hat = y - y_hat
         rss       : float        — Residual Sum of Squares
     """
     n = len(X)
@@ -295,11 +295,11 @@ def ols_fit(X, y):
 
 def hat_matrix(X):
     """
-    Tính Hat Matrix H = X(XᵀX)⁻¹Xᵀ và kiểm tra các tính chất.
+    Tính Hat Matrix H = X(X^T X)^-1 X^T và kiểm tra các tính chất.
 
     Tính chất (Mệnh đề 1.1):
-        (i)   H² = H          (idempotent)
-        (ii)  Hᵀ = H          (đối xứng)
+        (i)   H^2 = H         (idempotent)
+        (ii)  H^T = H         (đối xứng)
         (iii) trace(H) = p + 1
 
     Tham số
@@ -320,13 +320,13 @@ def hat_matrix(X):
     middle   = mat_mul(X, XtX_inv)
     H        = mat_mul(middle, Xt)
 
-    # Kiểm tra idempotent: H² = H
+    # Kiểm tra idempotent: H^2 = H
     H2 = mat_mul(H, H)
     for i in range(n):
         for j in range(n):
             assert abs(H2[i][j] - H[i][j]) < 1e-8, "Hat matrix khong thoa H^2 = H"
 
-    # Kiểm tra đối xứng: Hᵀ = H
+    # Kiểm tra đối xứng: H^T = H
     Ht = transpose(H)
     for i in range(n):
         for j in range(n):
@@ -348,11 +348,11 @@ def model_metrics(y, y_hat, p):
     Tính các chỉ số đánh giá mô hình hồi quy.
 
     Công thức:
-        RSS = Σ(yᵢ − ŷᵢ)²
-        TSS = Σ(yᵢ − ȳ)²
-        R²  = 1 − RSS/TSS
-        R̄²  = 1 − (n−1)/(n−p−1) · (1 − R²)
-        F   = [(TSS − RSS)/p] / [RSS/(n−p−1)]  ~ F_{p, n−p−1}
+        RSS = Sum((y_i - y_hat_i)^2)
+        TSS = Sum((y_i - mean_y)^2)
+        R2  = 1 - RSS/TSS
+        R2_adj = 1 - (n-1)/(n-p-1) * (1 - R2)
+        F   = [(TSS - RSS)/p] / [RSS/(n-p-1)]  ~ F(p, n-p-1)
 
     Tham số
     -------
@@ -402,17 +402,17 @@ def coef_inference(X, y, beta_hat, sigma2, alpha=0.05):
     Suy luận thống kê cho từng hệ số hồi quy.
 
     Công thức:
-        Var(β̂ | X) = σ²(XᵀX)⁻¹
-        SE(β̂ⱼ)    = σ̂ · √[(XᵀX)⁻¹]ⱼⱼ
-        tⱼ         = β̂ⱼ / SE(β̂ⱼ)  ~  t_{n−p−1}
-        CI₉₅%      = β̂ⱼ ± t_{α/2, n−p−1} · SE(β̂ⱼ)
+        Var(beta_hat | X) = sigma^2 * (X^T X)^-1
+        SE(beta_hat_j) = sigma_hat * sqrt([(X^T X)^-1]_jj)
+        t_j = beta_hat_j / SE(beta_hat_j)  ~  t(n-p-1)
+        CI_95% = beta_hat_j +/- t(alpha/2, n-p-1) * SE(beta_hat_j)
 
     Tham số
     -------
     X        : list of lists (n, p+1)
     y        : list (n,)
     beta_hat : list (p+1,)
-    sigma2   : float  — σ̂² từ ols_fit
+    sigma2   : float  — sigma2 từ ols_fit
     alpha    : float  — mức ý nghĩa (mặc định 0.05)
 
     Trả về
@@ -461,9 +461,9 @@ def vif(X):
     Tính Variance Inflation Factor (VIF) cho từng biến dự báo.
 
     Công thức:
-        VIFⱼ = 1 / (1 − R²ⱼ)
+        VIF_j = 1 / (1 - R2_j)
 
-    với R²ⱼ là R² khi hồi quy biến Xⱼ theo tất cả các biến còn lại.
+    với R2_j là R2 khi hồi quy biến X_j theo tất cả các biến còn lại.
     VIF > 10 cho thấy đa cộng tuyến nghiêm trọng.
 
     Tham số

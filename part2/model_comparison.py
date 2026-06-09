@@ -170,18 +170,18 @@ def subset_design_matrix(
 
 
 def predict(X: list[list[float]], beta_hat: Sequence[float]) -> list[float]:
-    """Dự đoán ŷ = Xβ."""
+    """Dự đoán y_hat = X * beta."""
     return [sum(x[j] * beta_hat[j] for j in range(len(beta_hat))) for x in X]
 
 
 def compute_test_metrics(y_true: Sequence[float], y_pred: Sequence[float]) -> dict[str, float]:
     """
-    Tính MAE, RMSE, R² trên tập test.
+    Tính MAE, RMSE, R^2 trên tập test.
 
     Công thức (PDF §2.3.3):
-        MAE  = (1/n) Σ|yᵢ − ŷᵢ|
-        RMSE = √[(1/n) Σ(yᵢ − ŷᵢ)²]
-        R²   = 1 − RSS_test / TSS_test
+        MAE  = (1/n) Sum(|y_i - y_hat_i|)
+        RMSE = sqrt[(1/n) Sum((y_i - y_hat_i)^2)]
+        R2   = 1 - RSS_test / TSS_test
     """
     y = list(y_true)
     y_hat = list(y_pred)
@@ -376,7 +376,7 @@ def compare_models(
     drop_duplicates: bool = True,
 ) -> pd.DataFrame:
     """
-    So sánh ≥ 3 mô hình và trả về bảng MAE, RMSE, R² trên test set.
+    So sánh >= 3 mô hình và trả về bảng MAE, RMSE, R^2 trên test set.
 
     Mô hình:
         - OLS (Full) — tối đa hóa số biến khả thi (n > p, full rank)
@@ -605,7 +605,7 @@ def plot_coefficient_importance(
     ax.set_yticklabels(labels)
     ax.invert_yaxis()
     ax.axvline(0, color="black", linewidth=0.8)
-    ax.set_xlabel("Hệ số β (scale đã chuẩn hóa)")
+    ax.set_xlabel("Hệ số beta (scale đã chuẩn hóa)")
     ax.set_title(title)
     ax.grid(axis="x", linestyle="--", alpha=0.4)
     plt.tight_layout()

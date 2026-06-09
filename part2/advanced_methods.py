@@ -98,7 +98,7 @@ def _vec_sub(a: list[float], b: list[float]) -> list[float]:
 
 
 def _sq_euclidean(x: list[float], z: list[float]) -> float:
-    """Tính ||x − z||² (bình phương khoảng cách Euclidean)."""
+    """Tính ||x - z||^2 (bình phương khoảng cách Euclidean)."""
     return sum((x[i] - z[i]) ** 2 for i in range(len(x)))
 
 
@@ -120,11 +120,11 @@ def _to_list_1d(y: pd.Series | np.ndarray | Sequence[float]) -> list[float]:
 
 def _compute_metrics(y_true: list[float], y_pred: list[float]) -> dict[str, float]:
     """
-    Tính MAE, RMSE, R² trên tập test (công thức đề §2.3.3).
+    Tính MAE, RMSE, R^2 trên tập test (công thức đề §2.3.3).
 
-    MAE  = (1/n) Σ|yᵢ − ŷᵢ|
-    RMSE = √[(1/n) Σ(yᵢ − ŷᵢ)²]
-    R²   = 1 − RSS / TSS
+    MAE  = (1/n) Sum(|y_i - y_hat_i|)
+    RMSE = sqrt[(1/n) Sum((y_i - y_hat_i)^2)]
+    R2   = 1 - RSS / TSS
     """
     n = len(y_true)
     errors = [y_true[i] - y_pred[i] for i in range(n)]
@@ -145,7 +145,7 @@ def rbf_kernel(x: list[float], z: list[float], ell: float) -> float:
     """
     Kernel RBF (Radial Basis Function / Gaussian kernel):
 
-        k_RBF(x, z) = exp(−||x − z||² / (2ℓ²))    (Đề §2.4, eq. 20)
+        k_RBF(x, z) = exp(-||x - z||^2 / (2 * l^2))    (Đề §2.4, eq. 20)
 
     Args:
         x, z : Hai vector đặc trưng (list 1D, không có intercept).
@@ -227,10 +227,10 @@ def kernel_ridge_fit(
     Huấn luyện Kernel Ridge Regression theo dạng dual.
 
     Công thức (Đề §2.4, eq. 19):
-        α = (K + λI)⁻¹ y                    — hệ số dual
-        ŷ(x*) = k(x*)ᵀ α                    — dự đoán
+        alpha = (K + lambda * I)^-1 * y           — hệ số dual
+        y_hat(x*) = k(x*)^T * alpha               — dự đoán
 
-    Với K_{ij} = k(x_i, x_j) là ma trận Gram, λI là regularization.
+    Với K_{ij} = k(x_i, x_j) là ma trận Gram, lambda * I là regularization.
 
     Args:
         X_train : Ma trận đặc trưng train (n × p), không có intercept.
@@ -243,7 +243,7 @@ def kernel_ridge_fit(
 
     Returns:
         dict:
-            alpha         : list (n,) — hệ số dual α = (K + λI)⁻¹ y.
+            alpha         : list (n,) — hệ số dual alpha = (K + lambda * I)^-1 y.
             K             : Ma trận Gram train (n × n).
             X_train       : Dữ liệu train (lưu để predict).
             y_hat         : list (n,) — fitted values.
@@ -259,11 +259,11 @@ def kernel_ridge_fit(
     # K + λI
     KlI = [[K[i][j] + (lam if i == j else 0.0) for j in range(n)] for i in range(n)]
 
-    # α = (K + λI)⁻¹ y
+    # alpha = (K + lambda * I)^-1 y
     KlI_inv = _mat_inv(KlI)
     alpha = _mat_vec_mul(KlI_inv, y_train)
 
-    # Fitted values: ŷ = K α
+    # Fitted values: y_hat = K * alpha
     y_hat = [sum(K[i][j] * alpha[j] for j in range(n)) for i in range(n)]
     residuals = _vec_sub(y_train, y_hat)
 
@@ -285,7 +285,7 @@ def kernel_ridge_predict(
     """
     Dự đoán với Kernel Ridge Regression đã huấn luyện.
 
-    Công thức: ŷ(x*) = k(x*, X_train)ᵀ α
+    Công thức: y_hat(x*) = k(x*, X_train)^T * alpha
     với k_i(x*) = k(x*, x_i) cho mỗi điểm train x_i.
 
     Args:
@@ -293,7 +293,7 @@ def kernel_ridge_predict(
         X_test     : Ma trận đặc trưng test (m × p), không có intercept.
 
     Returns:
-        list[float]: Vector dự đoán ŷ (m,).
+        list[float]: Vector dự đoán y_hat (m,).
     """
     alpha = fit_result["alpha"]
     X_train = fit_result["X_train"]
@@ -390,8 +390,8 @@ def tune_kernel_cv(
 
 def _estimate_sigma2_ols(X: list[list[float]], y: list[float]) -> float:
     """
-    Ước lượng phương sai nhiễu σ² từ OLS để làm noise prior cho Bayesian LR.
-        σ̂² = RSS / (n − p − 1)
+    Ước lượng phương sai nhiễu sigma^2 từ OLS để làm noise prior cho Bayesian LR.
+        sigma_hat^2 = RSS / (n - p - 1)
 
     Fallback về Var(y) nếu ma trận suy biến.
     """
@@ -420,32 +420,32 @@ def bayesian_lr_fit(
     Cập nhật phân phối posterior cho Bayesian Linear Regression.
 
     Prior (Gaussian conjugate, Đề §2.4 eq. 21):
-        β  ~ N(m₀, S₀)
+        beta ~ N(m_0, S_0)
 
     Likelihood:
-        y | X, β ~ N(Xβ, σ²I)
+        y | X, beta ~ N(X * beta, sigma^2 * I)
 
     Posterior (Đề §2.4 eq. 22–23):
-        Sₙ = (S₀⁻¹ + (1/σ²) XᵀX)⁻¹
-        mₙ = Sₙ (S₀⁻¹ m₀ + (1/σ²) Xᵀy)
+        S_n = (S_0^-1 + (1/sigma^2) X^T X)^-1
+        m_n = S_n (S_0^-1 m_0 + (1/sigma^2) X^T y)
 
-    Ghi chú: Với prior non-informative (τ² → ∞), mₙ hội tụ về ước lượng OLS.
+    Ghi chú: Với prior non-informative (tau^2 -> ∞), m_n hội tụ về ước lượng OLS.
 
     Args:
         X      : Ma trận design (n × (p+1)), đã có cột intercept.
         y      : Vector nhãn (n,).
-        sigma2 : Phương sai nhiễu σ² (đã biết hoặc ước lượng từ OLS).
+        sigma2 : Phương sai nhiễu sigma^2 (đã biết hoặc ước lượng từ OLS).
         m0     : Prior mean (p+1,). Mặc định = vector 0.
-        S0     : Prior covariance (p+1 × p+1). Mặc định = τ²I.
+        S0     : Prior covariance (p+1 × p+1). Mặc định = tau^2 * I.
         tau2   : Phương sai prior khi S0 = None (giá trị lớn = non-informative).
 
     Returns:
         dict:
-            mn        : list (p+1,) — posterior mean (điểm ước lượng β).
+            mn        : list (p+1,) — posterior mean (điểm ước lượng beta).
             Sn        : list[list] (p+1 × p+1) — posterior covariance.
             m0, S0    : Prior.
             sigma2    : float.
-            y_hat     : list (n,) — fitted values dùng mₙ.
+            y_hat     : list (n,) — fitted values dùng m_n.
             residuals : list (n,).
     """
     n, k = len(X), len(X[0])
@@ -461,11 +461,11 @@ def bayesian_lr_fit(
     XtX = _mat_mul(Xt, X)
     Xty = _mat_vec_mul(Xt, y)
 
-    # Sₙ = (S₀⁻¹ + (1/σ²) XᵀX)⁻¹
+    # S_n = (S_0^-1 + (1/sigma^2) X^T X)^-1
     A  = _mat_add(S0_inv, _scalar_mat(1.0 / sigma2, XtX))
     Sn = _mat_inv(A)
 
-    # mₙ = Sₙ (S₀⁻¹ m₀ + (1/σ²) Xᵀy)
+    # m_n = S_n (S_0^-1 m_0 + (1/sigma^2) X^T y)
     S0_inv_m0 = _mat_vec_mul(S0_inv, m0)
     b  = [S0_inv_m0[j] + Xty[j] / sigma2 for j in range(k)]
     mn = _mat_vec_mul(Sn, b)
@@ -492,8 +492,8 @@ def bayesian_lr_predict(
     Dự đoán với Bayesian LR, kèm uncertainty quantification.
 
     Phân phối predictive marginal:
-        p(y* | x*, X, y) = N(y*;  mₙᵀ x*,  σ²_pred(x*))
-        σ²_pred(x*) = σ² + x*ᵀ Sₙ x*       ← epistemic + aleatoric uncertainty
+        p(y* | x*, X, y) = N(y*;  m_n^T x*,  sigma^2_pred(x*))
+        sigma^2_pred(x*) = sigma^2 + x*^T S_n x*       <- epistemic + aleatoric uncertainty
 
     Args:
         X_test     : Ma trận design test (m × (p+1)), đã có cột intercept.
@@ -501,7 +501,7 @@ def bayesian_lr_predict(
 
     Returns:
         dict:
-            y_hat    : list (m,) — điểm dự đoán = posterior mean mₙᵀ x*.
+            y_hat    : list (m,) — điểm dự đoán = posterior mean m_n^T x*.
             pred_var : list (m,) — phương sai predictive từng quan sát.
             pred_std : list (m,) — độ lệch chuẩn predictive (= bán kính CI).
     """
@@ -550,7 +550,7 @@ def compare_advanced_models(
         kr_kernel        : 'rbf' hoặc 'poly'.
         k_folds          : Số fold cross-validation.
         seed             : Random seed để tái lập kết quả.
-        tau2             : Phương sai prior S₀ = τ²I cho Bayesian LR.
+        tau2             : Phương sai prior S_0 = tau^2 * I cho Bayesian LR.
 
     Returns:
         pd.DataFrame: 2 hàng — Kernel Ridge và Bayesian LR, với các cột:
@@ -591,7 +591,7 @@ def compare_advanced_models(
     })
 
     # ----------------------------------------------------------------
-    # 2. Bayesian Linear Regression — prior non-informative N(0, τ²I)
+    # 2. Bayesian Linear Regression — prior non-informative N(0, tau^2 * I)
     # ----------------------------------------------------------------
     # Thêm intercept cho Bayesian (cần design matrix đầy đủ)
     X_tr_design = [[1.0] + row for row in X_tr_raw]
@@ -629,16 +629,16 @@ def plot_kernel_actual_vs_predicted(
     y_test: list[float],
     title: str = "Kernel Ridge — Thực tế vs Dự đoán",
 ) -> None:
-    """Scatter plot: y_test vs ŷ_test. Đường đỏ = perfect prediction."""
+    """Scatter plot: y_test vs y_hat_test. Đường đỏ = perfect prediction."""
     import matplotlib.pyplot as plt
 
     y_pred = kernel_ridge_predict(fit_result, X_test)
     fig, ax = plt.subplots(figsize=(6, 5))
     ax.scatter(y_test, y_pred, alpha=0.6, edgecolors="k", linewidths=0.4)
     mn, mx = min(y_test + y_pred), max(y_test + y_pred)
-    ax.plot([mn, mx], [mn, mx], "r--", label="y = ŷ")
+    ax.plot([mn, mx], [mn, mx], "r--", label="y = y_hat")
     ax.set_xlabel("Giá trị thực y")
-    ax.set_ylabel("Dự đoán ŷ")
+    ax.set_ylabel("Dự đoán y_hat")
     ax.set_title(title)
     ax.legend()
     ax.grid(linestyle="--", alpha=0.4)
@@ -670,7 +670,7 @@ def plot_bayesian_credible_intervals(
 
     fig, ax = plt.subplots(figsize=(12, 5))
     ax.plot(idx, [y_test[i] for i in idx], "ko", markersize=4, label="Thực tế y", zorder=3)
-    ax.plot(idx, [y_hat[i]  for i in idx], "b-", linewidth=1.5, label="Posterior mean mₙᵀx*")
+    ax.plot(idx, [y_hat[i]  for i in idx], "b-", linewidth=1.5, label="Posterior mean m_n^T x*")
     ax.fill_between(idx, lower, upper, alpha=0.25, color="steelblue", label="95% Credible Interval")
     ax.set_xlabel("Chỉ số quan sát")
     ax.set_ylabel("Giá trị")
@@ -776,7 +776,7 @@ def test_gram_matrix_symmetric():
 
 
 def test_gram_matrix_diagonal_one():
-    """Đường chéo K(xᵢ, xᵢ) = 1 với mọi i khi dùng RBF kernel."""
+    """Đường chéo K(x_i, x_i) = 1 với mọi i khi dùng RBF kernel."""
     X = [[1.0, 0.0], [0.0, 2.0], [3.0, 3.0]]
     K = gram_matrix(X, kernel="rbf", ell=2.0)
     for i in range(len(X)):
@@ -812,7 +812,7 @@ def test_kernel_ridge_predict_shape():
 
 def test_bayesian_lr_prior_noninformative():
     """
-    Với prior non-informative (τ² = 10^8), posterior mean mₙ phải xấp xỉ OLS.
+    Với prior non-informative (tau^2 = 10^8), posterior mean m_n phải xấp xỉ OLS.
     """
     rng  = np.random.default_rng(1)
     n, p = 80, 3
@@ -833,7 +833,7 @@ def test_bayesian_lr_prior_noninformative():
 
     for j in range(p + 1):
         diff = abs(mn[j] - beta_ols[j])
-        assert diff < 0.01, f"β̂_Bayes[{j}] = {mn[j]:.4f} vs β̂_OLS[{j}] = {beta_ols[j]:.4f}"
+        assert diff < 0.01, f"beta_Bayes[{j}] = {mn[j]:.4f} vs beta_OLS[{j}] = {beta_ols[j]:.4f}"
     print("test_bayesian_lr_prior_noninformative PASSED")
 
 
@@ -902,6 +902,12 @@ def test_compare_advanced_models_smoke():
 # ===========================================================================
 
 if __name__ == "__main__":
+    import sys
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
+
     print("=" * 55)
     print("  RUN UNIT TESTS: advanced_methods.py")
     print("=" * 55)
